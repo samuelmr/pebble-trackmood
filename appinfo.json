@@ -15,21 +15,6 @@
   },
   "resources": {
     "media": [
-      {
-        "type":"png",
-        "name":"IMAGE_BUTTON_UP",
-        "file":"images/up.png"
-      },
-      {
-        "type":"png",
-        "name":"IMAGE_BUTTON_OK",
-        "file":"images/ok.png"
-      },
-      {
-        "type":"png",
-        "name":"IMAGE_BUTTON_DOWN",
-        "file":"images/down.png"
-      }
     ]
   }
 }
