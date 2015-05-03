@@ -1,0 +1,35 @@
+{
+  "uuid": "0c04a340-bc84-4337-834c-2ca803bb28d4",
+  "shortName": "Track Mood",
+  "longName": "Track Mood",
+  "companyName": "Samuel Rinnetmaki",
+  "versionCode": 1,
+  "versionLabel": "1.0",
+  "sdkVersion": "3",
+  "targetPlatforms": ["aplite", "basalt"],
+  "watchapp": {
+    "watchface": false
+  },
+  "appKeys": {
+    "dummy": 0
+  },
+  "resources": {
+    "media": [
+      {
+        "type":"png",
+        "name":"IMAGE_BUTTON_UP",
+        "file":"images/up.png"
+      },
+      {
+        "type":"png",
+        "name":"IMAGE_BUTTON_OK",
+        "file":"images/ok.png"
+      },
+      {
+        "type":"png",
+        "name":"IMAGE_BUTTON_DOWN",
+        "file":"images/down.png"
+      }
+    ]
+  }
+}
