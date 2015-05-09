@@ -12,30 +12,38 @@ enum Mood {
   AWESOME = 4
 };
 
+enum Daytime {
+  MORNING = 0,
+  AFTERNOON = 1,
+  DAY = 2,
+  EVENING = 3,
+  NIGHT = 4
+};
+
 const char *Times[] = {"morning", "afternoon", "day", "evening, night"};
 const char *Moods[] = {"Terrible", "Not great", "OK", "Great", "Awesome"};
 
-int current_mood = 3;
-int current_time = 2;
+int current_mood = GREAT;
+int current_time = DAY;
 
 static void greet_me() {
   static char greet_text[40];
   time_t now = time(NULL);
   struct tm *tms = localtime(&now);
   if (tms->tm_hour < 5) {
-    current_time = 4;
+    current_time = NIGHT;
   }
   else if (tms->tm_hour < 12) {
-    current_time = 0;
+    current_time = MORNING;
   }
   else if (tms->tm_hour < 15) {
-    current_time = 1;
+    current_time = DAY;
   }
   else if (tms->tm_hour < 19) {
-    current_time = 2;
+    current_time = EVENING;
   }
   else {
-    current_time = 4;
+    current_time = NIGHT;
   }
   snprintf(greet_text, sizeof(greet_text), "Good %s!\nHow are you feeling?", Times[current_time]);
   text_layer_set_text(greet_layer, greet_text);
