@@ -6,7 +6,7 @@ static TextLayer *mood_layer;
 static Layer *icon_layer;
 static GDrawCommandImage *mood_icon;
 
-static const int16_t ICON_DIMENSIONS = 50;
+static const int16_t ICON_DIMENSIONS = 100;
 
 enum Mood {
   TERRIBLE = 0,
@@ -26,8 +26,9 @@ enum Daytime {
 
 const char *Times[] = {"morning", "afternoon", "day", "evening", "night"};
 const char *Moods[] = {"Terrible", "Not great", "OK", "Great", "Awesome"};
+// const GColor Colors[5];
 
-int current_mood = AWESOME;
+int current_mood = GREAT;
 int current_time = DAY;
 
 static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
@@ -88,6 +89,7 @@ static void greet_me() {
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   layer_mark_dirty(icon_layer);
+  // window_set_background_color(window, Colors[current_mood]);
   text_layer_set_text(mood_layer, Moods[current_mood]);
 }
 
@@ -120,14 +122,14 @@ static void window_load(Window *window) {
   GRect bounds = layer_get_bounds(window_layer);
 
   GRect icon_rect = GRect(0, 0, ICON_DIMENSIONS, ICON_DIMENSIONS);
-  GRect alignment_rect = GRect(0, 50, bounds.size.w, 100);
+  GRect alignment_rect = GRect(0, 40, bounds.size.w, 100);
   // center icon, not TopRight
   grect_align(&icon_rect, &alignment_rect, GAlignCenter, false);
   icon_layer = layer_create(icon_rect);
   layer_set_update_proc(icon_layer, icon_layer_update_proc);
   layer_add_child(window_layer, icon_layer);
 
-  GRect greet_layer_size = GRect(0, 0, bounds.size.w, 35);
+  GRect greet_layer_size = GRect(0, 10, bounds.size.w, 30);
   greet_layer = text_layer_create(greet_layer_size);
   text_layer_set_font(greet_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
   text_layer_set_text_alignment(greet_layer, GTextAlignmentCenter);
@@ -155,6 +157,7 @@ static void window_unload(Window *window) {
 }
 
 static void init(void) {
+  // const GColor Colors[] = {GColorRed, GColorOrange, GColorChromeYellow, GColorYellow, GColorGreen};
   window = window_create();
   window_set_click_config_provider(window, click_config_provider);
   window_set_window_handlers(window, (WindowHandlers) {
