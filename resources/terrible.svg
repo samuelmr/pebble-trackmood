@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 50 50" enable-background="new 0 0 50 50" xml:space="preserve">
+<g id="Backdrop" display="none">
+	<rect x="0" y="0" display="inline" fill="#FFFFFF" width="144" height="168"/>
+</g>
+<g id="Format" display="none">
+	<rect display="inline" fill="#FFFFFF" width="50" height="50"/>
+</g>
+<g id="Design">
+	<polygon fill="#FFFFFF" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10"  points="10,10 10,20 20,20 20,10" />
+	<polygon fill="#FFFFFF" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10"  points="30,10 40,10 40,20 30,20" />
+	<polyline fill="none" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10"  points="15,35 20,30 30,30 35,35" />
+</g>
+<g id="Mockup" display="none">
+</g>
+<g id="Guides" display="none">
+</g>
+<g id="Comments" display="none">
+</g>
+</svg>
