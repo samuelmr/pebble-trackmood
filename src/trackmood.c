@@ -3,6 +3,10 @@
 static Window *window;
 static TextLayer *greet_layer;
 static TextLayer *mood_layer;
+static Layer *icon_layer;
+static GDrawCommandImage *mood_icon;
+
+static const int16_t ICON_DIMENSIONS = 50;
 
 enum Mood {
   TERRIBLE = 0,
@@ -20,11 +24,44 @@ enum Daytime {
   NIGHT = 4
 };
 
-const char *Times[] = {"morning", "afternoon", "day", "evening, night"};
+const char *Times[] = {"morning", "afternoon", "day", "evening", "night"};
 const char *Moods[] = {"Terrible", "Not great", "OK", "Great", "Awesome"};
 
-int current_mood = GREAT;
+int current_mood = AWESOME;
 int current_time = DAY;
+
+static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
+
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Updating icon to %d", current_mood);
+
+  switch (current_mood) {
+    case TERRIBLE:
+      mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_TERRIBLE);
+	  break;
+    case NOT_GREAT:
+      mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_NOT_GREAT);
+	  break;
+    case GREAT:
+      mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_GREAT);
+	  break;
+    case AWESOME:
+      mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_AWESOME);
+	  break;
+    default:
+    case OK:
+      mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_OK);
+  }
+  if (!mood_icon) {
+    return;
+  }
+
+  GDrawCommandImage *temp_copy = gdraw_command_image_clone(mood_icon);
+  // attract_draw_command_image_to_square(temp_copy, model->icon.to_square_normalized);
+  graphics_context_set_antialiased(ctx, true);
+  gdraw_command_image_draw(ctx, temp_copy, GPoint(0, 0));
+  free(temp_copy);
+  return;
+}
 
 static void greet_me() {
   static char greet_text[40];
@@ -50,6 +87,7 @@ static void greet_me() {
 }
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  layer_mark_dirty(icon_layer);
   text_layer_set_text(mood_layer, Moods[current_mood]);
 }
 
@@ -58,6 +96,7 @@ static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (current_mood > AWESOME) {
     current_mood = AWESOME;
   }
+  layer_mark_dirty(icon_layer);
   text_layer_set_text(mood_layer, Moods[current_mood]);
 }
 
@@ -66,6 +105,7 @@ static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (current_mood < TERRIBLE) {
     current_mood = TERRIBLE;
   }
+  layer_mark_dirty(icon_layer);
   text_layer_set_text(mood_layer, Moods[current_mood]);
 }
 
@@ -78,6 +118,14 @@ static void click_config_provider(void *context) {
 static void window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
+
+  GRect icon_rect = GRect(0, 0, ICON_DIMENSIONS, ICON_DIMENSIONS);
+  GRect alignment_rect = GRect(0, 50, bounds.size.w, 100);
+  // center icon, not TopRight
+  grect_align(&icon_rect, &alignment_rect, GAlignCenter, false);
+  icon_layer = layer_create(icon_rect);
+  layer_set_update_proc(icon_layer, icon_layer_update_proc);
+  layer_add_child(window_layer, icon_layer);
 
   GRect greet_layer_size = GRect(0, 0, bounds.size.w, 35);
   greet_layer = text_layer_create(greet_layer_size);
@@ -93,19 +141,11 @@ static void window_load(Window *window) {
   text_layer_set_text_alignment(mood_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(mood_layer));
     
-#ifdef PBL_COLOR
   window_set_background_color(window, GColorOxfordBlue);
   text_layer_set_text_color(greet_layer, GColorCeleste);
   text_layer_set_background_color(greet_layer, GColorClear);
   text_layer_set_text_color(mood_layer, GColorChromeYellow);
   text_layer_set_background_color(mood_layer, GColorClear);
-#else
-  window_set_background_color(window, GColorBlack);
-  text_layer_set_text_color(greet_layer, GColorWhite);
-  text_layer_set_background_color(greet_layer, GColorClear);
-  text_layer_set_text_color(mood_layer, GColorWhite);
-  text_layer_set_background_color(mood_layer, GColorClear);
-#endif
 
 }
 
