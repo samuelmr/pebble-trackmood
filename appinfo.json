@@ -6,7 +6,7 @@
   "versionCode": 1,
   "versionLabel": "1.0",
   "sdkVersion": "3",
-  "targetPlatforms": ["aplite", "basalt"],
+  "targetPlatforms": ["basalt"],
   "watchapp": {
     "watchface": false
   },
@@ -15,6 +15,31 @@
   },
   "resources": {
     "media": [
+      {
+        "type": "raw",
+        "name": "ICON_TERRIBLE",
+        "file": "terrible.pdc"
+      },
+      {
+        "type": "raw",
+        "name": "ICON_NOT_GREAT",
+        "file": "not_great.pdc"
+      },
+      {
+        "type": "raw",
+        "name": "ICON_OK",
+        "file": "ok.pdc"
+      },
+      {
+        "type": "raw",
+        "name": "ICON_GREAT",
+        "file": "great.pdc"
+      },
+      {
+        "type": "raw",
+        "name": "ICON_AWESOME",
+        "file": "awesome.pdc"
+      }
     ]
   }
 }
