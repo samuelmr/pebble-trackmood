@@ -11,7 +11,8 @@
     "watchface": false
   },
   "appKeys": {
-    "dummy": 0
+    "mood": 0,
+    "time": 1
   },
   "resources": {
     "media": [

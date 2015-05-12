@@ -5,6 +5,7 @@ static TextLayer *greet_layer;
 static TextLayer *mood_layer;
 static Layer *icon_layer;
 static GDrawCommandImage *mood_icon;
+static WakeupId wakeup_id;
 
 static const int16_t ICON_DIMENSIONS = 100;
 
@@ -24,8 +25,13 @@ enum Daytime {
   NIGHT = 4
 };
 
-const char *Times[] = {"morning", "afternoon", "day", "evening", "night"};
+enum KEYS {
+  MOOD = 0,
+  TIME = 1
+};
+
 const char *Moods[] = {"Terrible", "Not great", "OK", "Great", "Awesome"};
+const char *Times[] = {"morning", "afternoon", "day", "evening", "night"};
 // const GColor Colors[5];
 
 int current_mood = GREAT;
@@ -57,7 +63,6 @@ static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
   }
 
   GDrawCommandImage *temp_copy = gdraw_command_image_clone(mood_icon);
-  // attract_draw_command_image_to_square(temp_copy, model->icon.to_square_normalized);
   graphics_context_set_antialiased(ctx, true);
   gdraw_command_image_draw(ctx, temp_copy, GPoint(0, 0));
   free(temp_copy);
@@ -89,8 +94,21 @@ static void greet_me() {
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   layer_mark_dirty(icon_layer);
-  // window_set_background_color(window, Colors[current_mood]);
   text_layer_set_text(mood_layer, Moods[current_mood]);
+  DictionaryIterator *iter;
+  app_message_outbox_begin(&iter);
+  if (iter == NULL) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "Can not send mood to phone: dictionary init failed!");
+    return;
+  }
+  dict_write_int8(iter, MOOD, current_mood);
+  dict_write_int8(iter, TIME, current_time);
+  dict_write_end(iter);
+  app_message_outbox_send();
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Sent mood %d for time %d to phone!", current_mood, current_time);
+  if (wakeup_id && wakeup_query(wakeup_id, NULL)) {
+    wakeup_cancel(wakeup_id);
+  }
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -100,6 +118,7 @@ static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
   }
   layer_mark_dirty(icon_layer);
   text_layer_set_text(mood_layer, Moods[current_mood]);
+  // send mood to JS as app message
 }
 
 static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -115,6 +134,19 @@ static void click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
+}
+
+void in_received_handler(DictionaryIterator *received, void *context) {
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Mood sent to phone");
+}
+
+void in_dropped_handler(AppMessageResult reason, void *context) {
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Message from phone dropped: %d", reason);
+}
+
+static void wakeup_handler(WakeupId id, int32_t mood) {
+  current_mood = (int) mood;
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Woken up by wakeup %lu (last mood %lu)!", id, mood);
 }
 
 static void window_load(Window *window) {
@@ -158,6 +190,27 @@ static void window_unload(Window *window) {
 
 static void init(void) {
   // const GColor Colors[] = {GColorRed, GColorOrange, GColorChromeYellow, GColorYellow, GColorGreen};
+
+  current_mood = persist_exists(MOOD) ? persist_read_int(MOOD) : current_mood;
+
+  wakeup_service_subscribe(wakeup_handler);
+  app_message_register_inbox_received(in_received_handler);
+  app_message_register_inbox_dropped(in_dropped_handler);
+  app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
+
+  // Does this make sense at all?
+  if(launch_reason() == APP_LAUNCH_TIMELINE_ACTION) {
+    uint32_t timemood = launch_get_args();
+    // get time and mood from timemood!
+    int time = timemood % 10;
+    int mood = timemood - (10 * time);
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "Launched from timeline, time: %d, mood: %d", time, mood);
+    current_mood = mood;
+    static char greet_text[40];
+    snprintf(greet_text, sizeof(greet_text), "In the %s you were feeling...", Times[time]);
+    text_layer_set_text(greet_layer, greet_text);
+  }
+
   window = window_create();
   window_set_click_config_provider(window, click_config_provider);
   window_set_window_handlers(window, (WindowHandlers) {
@@ -170,6 +223,7 @@ static void init(void) {
 
 static void deinit(void) {
   window_destroy(window);
+  persist_write_int(MOOD, current_mood);
 }
 
 int main(void) {
