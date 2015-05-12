@@ -31,7 +31,7 @@ function pushMoodPin(mood, time) {
     "time": new Date().toISOString(),
     "layout": {
       "type": "genericPin",
-      "title": Moods[mood] + " feeling",
+      "title": Moods[mood] + " mood",
       "subtitle": "in the " + Times[time],
       "body": "Can you think of why? What happened then? What made you feel that way?",
       "tinyIcon": "system://images/TIMELINE_CALENDAR_TINY"
