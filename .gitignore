@@ -3,3 +3,4 @@ appstore-resources
 build
 resources/*.pdc
 tools
+.DS_Store
