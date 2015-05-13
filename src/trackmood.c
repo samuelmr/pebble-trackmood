@@ -109,6 +109,33 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (wakeup_id && wakeup_query(wakeup_id, NULL)) {
     wakeup_cancel(wakeup_id);
   }
+
+/* clock_to_timestamp crashes
+  time_t next_time;
+  time_t now = time(NULL);
+  struct tm *tms = localtime(&now);
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "SUNDAY is (%d).", SUNDAY);
+  if (tms->tm_hour < 8) {
+    next_time = clock_to_timestamp(TODAY, 9, 0);
+  }
+  else if (tms->tm_hour < 12) {
+    next_time = clock_to_timestamp(TODAY, 13, 0);
+  }
+  else if (tms->tm_hour < 16) {
+    next_time = clock_to_timestamp(TODAY, 17, 0);
+  }
+  else if (tms->tm_hour < 20) {
+    next_time = clock_to_timestamp(TODAY, 21, 0);
+  }
+  else {
+    int tomorrow = tms->tm_wday + 2;
+    tomorrow = (tomorrow <= 7) ? tomorrow : 1;
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "After eight, weekday is %d, tomorrow is %d", tms->tm_wday, tomorrow);
+    time_t next_time = clock_to_timestamp(tomorrow, 9, 0);
+  }
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Setting wakeup timer (%lu) for %lu.", wakeup_id, (int32_t) next_time);
+  wakeup_id = wakeup_schedule(next_time, (int32_t) current_mood, true);
+*/
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
