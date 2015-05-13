@@ -1,4 +1,4 @@
-var Moods = ["Terrible", "Not great", "OK", "Great", "Awesome"];
+var Moods = ["Terrible", "Bad", "OK", "Great", "Awesome"];
 var Times = ["morning", "afternoon", "daytime", "evening", "night"];
 
 Pebble.addEventListener("ready",

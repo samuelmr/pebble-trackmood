@@ -11,7 +11,7 @@ static const int16_t ICON_DIMENSIONS = 100;
 
 enum Mood {
   TERRIBLE = 0,
-  NOT_GREAT = 1,
+  BAD = 1,
   OK = 2,
   GREAT = 3,
   AWESOME = 4
@@ -30,7 +30,7 @@ enum KEYS {
   TIME = 1
 };
 
-const char *Moods[] = {"Terrible", "Not great", "OK", "Great", "Awesome"};
+const char *Moods[] = {"Terrible", "Bad", "OK", "Great", "Awesome"};
 const char *Times[] = {"morning", "afternoon", "day", "evening", "night"};
 // const GColor Colors[5];
 
@@ -45,8 +45,8 @@ static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
     case TERRIBLE:
       mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_TERRIBLE);
 	  break;
-    case NOT_GREAT:
-      mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_NOT_GREAT);
+    case BAD:
+      mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_BAD);
 	  break;
     case GREAT:
       mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_GREAT);
