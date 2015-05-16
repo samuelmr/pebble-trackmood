@@ -24,11 +24,12 @@ Pebble.addEventListener("appmessage",
 );
 
 function pushMoodPin(mood, time) {
-  var id = new Date().getTime().toString();
+  var d = new Date();
+  var id = d.getTime().toString();
   console.log("Mood is " + Moods[mood] + ", time is " + Times[time]);
   var pin = {
     "id": id,
-    "time": new Date().toISOString(),
+    "time": d.toISOString(),
     "layout": {
       "type": "genericPin",
       "foregroundColor": "#AAFFFF",
@@ -40,16 +41,22 @@ function pushMoodPin(mood, time) {
     }
   };
   console.log("Sending pin: " + JSON.stringify(pin));
-  insertUserPin(pin, function(result) {console.log('Pushed mood pin: ' + result);});
+  insertUserPin(pin, function(result) {
+    console.log('Pushed mood pin: ' + result);
+    var time = d.getHours() + ':' +
+      (d.getMinutes() < 10 ? '0' : '') +
+      d.getMinutes();
+    var msg = 'Pushed pin.\n' + Moods[mood] + ' at ' + time;
+    Pebble.sendAppMessage({mood: msg}, appMessageAck, appMessageNack);    
+  });
 }
 
-// unused?
 function appMessageAck(e) {
   console.log("Message accepted by Pebble!");
 }
 
 function appMessageNack(e) {
-  console.log("Message rejected by Pebble!");
+  console.warn("Message rejected by Pebble! " + JSON.stringify(e.data));
 }
 
 

@@ -165,10 +165,15 @@ static void click_config_provider(void *context) {
 
 void in_received_handler(DictionaryIterator *received, void *context) {
   APP_LOG(APP_LOG_LEVEL_DEBUG, "Mood sent to phone");
+  Tuple *mt = dict_find(received, MOOD);
+  static char greet_text[40];
+  strcpy(greet_text, mt->value->cstring);
+  text_layer_set_text(greet_layer, greet_text);
 }
 
 void in_dropped_handler(AppMessageResult reason, void *context) {
   APP_LOG(APP_LOG_LEVEL_DEBUG, "Message from phone dropped: %d", reason);
+  text_layer_set_text(greet_layer, "Couldn't push pin.\nPlease try again!");
 }
 
 static void wakeup_handler(WakeupId id, int32_t mood) {
@@ -216,8 +221,6 @@ static void window_unload(Window *window) {
 }
 
 static void init(void) {
-  // const GColor Colors[] = {GColorRed, GColorOrange, GColorChromeYellow, GColorYellow, GColorGreen};
-
   current_mood = persist_exists(MOOD) ? persist_read_int(MOOD) : current_mood;
 
   wakeup_service_subscribe(wakeup_handler);
