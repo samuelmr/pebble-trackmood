@@ -6,6 +6,10 @@ static TextLayer *mood_layer;
 static Layer *icon_layer;
 static GDrawCommandImage *mood_icon;
 static WakeupId wakeup_id;
+static const VibePattern CUSTOM_PATTERN = {
+  .durations = (uint32_t[]) {100, 50, 250, 150, 100, 50, 250, 150, 100},
+  .num_segments = 9
+};
 
 static const int16_t ICON_DIMENSIONS = 100;
 
@@ -32,7 +36,6 @@ enum KEYS {
 
 const char *Moods[] = {"Terrible", "Bad", "OK", "Great", "Awesome"};
 const char *Times[] = {"morning", "afternoon", "day", "evening", "night"};
-// const GColor Colors[5];
 
 int current_mood = GREAT;
 int current_time = DAY;
@@ -105,37 +108,10 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   dict_write_int8(iter, TIME, current_time);
   dict_write_end(iter);
   app_message_outbox_send();
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Sent mood %d for time %d to phone!", current_mood, current_time);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Sent mood %d for time %d to phone!", current_mood, current_time);
   if (wakeup_id && wakeup_query(wakeup_id, NULL)) {
     wakeup_cancel(wakeup_id);
   }
-
-/* clock_to_timestamp crashes
-  time_t next_time;
-  time_t now = time(NULL);
-  struct tm *tms = localtime(&now);
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "SUNDAY is (%d).", SUNDAY);
-  if (tms->tm_hour < 8) {
-    next_time = clock_to_timestamp(TODAY, 9, 0);
-  }
-  else if (tms->tm_hour < 12) {
-    next_time = clock_to_timestamp(TODAY, 13, 0);
-  }
-  else if (tms->tm_hour < 16) {
-    next_time = clock_to_timestamp(TODAY, 17, 0);
-  }
-  else if (tms->tm_hour < 20) {
-    next_time = clock_to_timestamp(TODAY, 21, 0);
-  }
-  else {
-    int tomorrow = tms->tm_wday + 2;
-    tomorrow = (tomorrow <= 7) ? tomorrow : 1;
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "After eight, weekday is %d, tomorrow is %d", tms->tm_wday, tomorrow);
-    time_t next_time = clock_to_timestamp(tomorrow, 9, 0);
-  }
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Setting wakeup timer (%lu) for %lu.", wakeup_id, (int32_t) next_time);
-  wakeup_id = wakeup_schedule(next_time, (int32_t) current_mood, true);
-*/
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -164,7 +140,7 @@ static void click_config_provider(void *context) {
 }
 
 void in_received_handler(DictionaryIterator *received, void *context) {
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Mood sent to phone");
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Mood sent to phone");
   Tuple *mt = dict_find(received, MOOD);
   static char greet_text[40];
   strcpy(greet_text, mt->value->cstring);
@@ -172,13 +148,14 @@ void in_received_handler(DictionaryIterator *received, void *context) {
 }
 
 void in_dropped_handler(AppMessageResult reason, void *context) {
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Message from phone dropped: %d", reason);
+  // APP_LOG(APP_LOG_LEVEL_WARNING, "Message from phone dropped: %d", reason);
   text_layer_set_text(greet_layer, "Couldn't push pin.\nPlease try again!");
 }
 
 static void wakeup_handler(WakeupId id, int32_t mood) {
   current_mood = (int) mood;
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Woken up by wakeup %lu (last mood %lu)!", id, mood);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Woken up by wakeup %ld (last mood %ld)!", id, mood);
+  vibes_enqueue_custom_pattern(CUSTOM_PATTERN);
 }
 
 static void window_load(Window *window) {
@@ -220,10 +197,38 @@ static void window_unload(Window *window) {
   text_layer_destroy(greet_layer);
 }
 
+static void schedule_wakeup(int mood) {
+  time_t next_time;
+  time_t now = time(NULL);
+  struct tm *tms = localtime(&now);
+  if (tms->tm_hour < 8) {
+    next_time = clock_to_timestamp(TODAY, 9, 0);
+  }
+  else if (tms->tm_hour < 12) {
+    next_time = clock_to_timestamp(TODAY, 13, 0);
+  }
+  else if (tms->tm_hour < 16) {
+    next_time = clock_to_timestamp(TODAY, 17, 0);
+  }
+  else if (tms->tm_hour < 20) {
+    next_time = clock_to_timestamp(TODAY, 21, 0);
+  }
+  else {
+    int tomorrow = tms->tm_wday + 2;
+    tomorrow = (tomorrow <= 7) ? tomorrow : 1;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "After eight, weekday is %d, tomorrow is %d", tms->tm_wday, tomorrow);
+    next_time = clock_to_timestamp(tomorrow, 9, 0);
+  }
+  wakeup_id = wakeup_schedule(next_time, (int32_t) mood, true);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %ld: %ld.", (int32_t) next_time, wakeup_id);
+}
+
 static void init(void) {
   current_mood = persist_exists(MOOD) ? persist_read_int(MOOD) : current_mood;
 
   wakeup_service_subscribe(wakeup_handler);
+  schedule_wakeup(current_mood);
+
   app_message_register_inbox_received(in_received_handler);
   app_message_register_inbox_dropped(in_dropped_handler);
   app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
@@ -234,7 +239,7 @@ static void init(void) {
     // get time and mood from timemood!
     int time = timemood % 10;
     int mood = timemood - (10 * time);
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "Launched from timeline, time: %d, mood: %d", time, mood);
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Launched from timeline, time: %d, mood: %d", time, mood);
     current_mood = mood;
     static char greet_text[40];
     snprintf(greet_text, sizeof(greet_text), "In the %s you were feeling...", Times[time]);
@@ -258,9 +263,7 @@ static void deinit(void) {
 
 int main(void) {
   init();
-
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Done initializing, pushed window: %p", window);
-
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Done initializing, pushed window: %p", window);
   app_event_loop();
   deinit();
 }

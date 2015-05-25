@@ -3,22 +3,21 @@ var Times = ["morning", "afternoon", "daytime", "evening", "night"];
 
 Pebble.addEventListener("ready",
     function(e) {
-        console.log("Javascript ready!");
+      // console.log("Javascript ready!");
     }
 );
 
 Pebble.addEventListener("appmessage",
   function(e) {
-    console.log('Got message! ' + JSON.stringify(e.payload));
+    // console.log('Got message! ' + JSON.stringify(e.payload));
     if (e && e.payload) {
       var mood = e.payload.mood;
-      // unnecessary?
       var time = e.payload.time;
-      console.log("Mood is " + mood + ", time is " + time);
+      // console.log("Mood is " + mood + ", time is " + time);
       pushMoodPin(mood, time);
     }
     else {
-      console.log("No payload in message from watch!");  
+      console.warn("No payload in message from watch!");  
     }
   }
 );
@@ -26,7 +25,7 @@ Pebble.addEventListener("appmessage",
 function pushMoodPin(mood, time) {
   var d = new Date();
   var id = d.getTime().toString();
-  console.log("Mood is " + Moods[mood] + ", time is " + Times[time]);
+  // console.log("Mood is " + Moods[mood] + ", time is " + Times[time]);
   var pin = {
     "id": id,
     "time": d.toISOString(),
@@ -40,9 +39,9 @@ function pushMoodPin(mood, time) {
       "tinyIcon": "system://images/TIMELINE_CALENDAR_TINY"
     }
   };
-  console.log("Sending pin: " + JSON.stringify(pin));
+  // console.log("Sending pin: " + JSON.stringify(pin));
   insertUserPin(pin, function(result) {
-    console.log('Pushed mood pin: ' + result);
+    // console.log('Pushed mood pin: ' + result);
     var time = d.getHours() + ':' +
       (d.getMinutes() < 10 ? '0' : '') +
       d.getMinutes();
@@ -52,7 +51,7 @@ function pushMoodPin(mood, time) {
 }
 
 function appMessageAck(e) {
-  console.log("Message accepted by Pebble!");
+  // console.log("Message accepted by Pebble!");
 }
 
 function appMessageNack(e) {
@@ -78,7 +77,7 @@ function timelineRequest(pin, type, callback) {
   // Create XHR
   var xhr = new XMLHttpRequest();
   xhr.onload = function () {
-    console.log('timeline: response received: ' + this.responseText);
+    // console.log('timeline: response received: ' + this.responseText);
     callback(this.responseText);
   };
   xhr.open(type, url);
@@ -91,7 +90,7 @@ function timelineRequest(pin, type, callback) {
 
     // Send
     xhr.send(JSON.stringify(pin));
-    console.log('timeline: request sent.');
+    // console.log('timeline: request sent.');
   }, function(error) { console.log('timeline: error getting timeline token: ' + error); });
 }
 
