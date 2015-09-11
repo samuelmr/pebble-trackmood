@@ -95,6 +95,38 @@ static void greet_me() {
   text_layer_set_text(greet_layer, greet_text);
 }
 
+static void schedule_wakeup(int mood) {
+  time_t next_time;
+  time_t now = time(NULL);
+  struct tm *tms = localtime(&now);
+  if (tms->tm_hour < 8) {
+    next_time = clock_to_timestamp(TODAY, 9, 0);
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 AM today: %d", (int) next_time);
+  }
+  else if (tms->tm_hour < 12) {
+    next_time = clock_to_timestamp(TODAY, 13, 0);
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 1 PM today: %d", (int) next_time);
+  }
+  else if (tms->tm_hour < 16) {
+    next_time = clock_to_timestamp(TODAY, 17, 0);
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 5 PM today: %d", (int) next_time);
+  }
+  else if (tms->tm_hour < 20) {
+    next_time = clock_to_timestamp(TODAY, 21, 0);
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 PM today: %d", (int) next_time);
+  }
+  else {
+    int tomorrow = tms->tm_wday + 2;
+    tomorrow = (tomorrow <= 7) ? tomorrow : 1;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "After eight, weekday is %d, tomorrow is %d", tms->tm_wday, tomorrow);
+    next_time = clock_to_timestamp(tomorrow, 9, 0);
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 AM tomorrow: %d", (int) next_time);
+  }
+  wakeup_cancel_all();
+  wakeup_id = wakeup_schedule(next_time, (int32_t) mood, true);
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %d: %d.", (int) next_time, (int) wakeup_id);
+}
+
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   layer_mark_dirty(icon_layer);
   text_layer_set_text(mood_layer, Moods[current_mood]);
@@ -109,9 +141,7 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   dict_write_end(iter);
   app_message_outbox_send();
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Sent mood %d for time %d to phone!", current_mood, current_time);
-  if (wakeup_id && wakeup_query(wakeup_id, NULL)) {
-    wakeup_cancel(wakeup_id);
-  }
+  schedule_wakeup(current_mood);
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -183,7 +213,7 @@ static void window_load(Window *window) {
   text_layer_set_font(mood_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
   text_layer_set_text_alignment(mood_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(mood_layer));
-    
+
   window_set_background_color(window, GColorOxfordBlue);
   text_layer_set_text_color(greet_layer, GColorCeleste);
   text_layer_set_background_color(greet_layer, GColorClear);
@@ -195,32 +225,6 @@ static void window_load(Window *window) {
 static void window_unload(Window *window) {
   text_layer_destroy(mood_layer);
   text_layer_destroy(greet_layer);
-}
-
-static void schedule_wakeup(int mood) {
-  time_t next_time;
-  time_t now = time(NULL);
-  struct tm *tms = localtime(&now);
-  if (tms->tm_hour < 8) {
-    next_time = clock_to_timestamp(TODAY, 9, 0);
-  }
-  else if (tms->tm_hour < 12) {
-    next_time = clock_to_timestamp(TODAY, 13, 0);
-  }
-  else if (tms->tm_hour < 16) {
-    next_time = clock_to_timestamp(TODAY, 17, 0);
-  }
-  else if (tms->tm_hour < 20) {
-    next_time = clock_to_timestamp(TODAY, 21, 0);
-  }
-  else {
-    int tomorrow = tms->tm_wday + 2;
-    tomorrow = (tomorrow <= 7) ? tomorrow : 1;
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "After eight, weekday is %d, tomorrow is %d", tms->tm_wday, tomorrow);
-    next_time = clock_to_timestamp(tomorrow, 9, 0);
-  }
-  wakeup_id = wakeup_schedule(next_time, (int32_t) mood, true);
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %ld: %ld.", (int32_t) next_time, wakeup_id);
 }
 
 static void init(void) {
