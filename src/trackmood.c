@@ -1,6 +1,12 @@
 #include <pebble.h>
+#define HISTORY_BATCH_SIZE 25
+#define HISTORY_MAX_BATCHES 16
+#define EVENT_TEXT_SIZE 30
 
 static Window *window;
+static Window *history_window;
+static ScrollLayer *history_scroller;
+static TextLayer *history_layer;
 static TextLayer *greet_layer;
 static TextLayer *mood_layer;
 static Layer *icon_layer;
@@ -10,8 +16,12 @@ static const VibePattern CUSTOM_PATTERN = {
   .durations = (uint32_t[]) {100, 50, 250, 150, 100, 50, 250, 150, 100},
   .num_segments = 9
 };
-
+static char greet_text[40];
+static char event_text[EVENT_TEXT_SIZE];
+static char history_text[HISTORY_MAX_BATCHES * HISTORY_BATCH_SIZE * EVENT_TEXT_SIZE];
+static char timestr[15];
 static const int16_t ICON_DIMENSIONS = 100;
+static const bool animated = true;
 
 enum Mood {
   TERRIBLE = 0,
@@ -31,7 +41,9 @@ enum Daytime {
 
 enum KEYS {
   MOOD = 0,
-  TIME = 1
+  TIME = 1,
+  HISTORY_BATCH_COUNT = 2,
+  FIRST_HISTORY_BATCH = 10
 };
 
 const char *Moods[] = {"Terrible", "Bad", "OK", "Great", "Awesome"};
@@ -39,6 +51,15 @@ const char *Times[] = {"morning", "afternoon", "day", "evening", "night"};
 
 int current_mood = GREAT;
 int current_time = DAY;
+
+typedef struct History {
+  time_t event_time[HISTORY_BATCH_SIZE];
+  int mood[HISTORY_BATCH_SIZE];
+  int last_event;
+} __attribute__((__packed__)) History;
+
+static History history[HISTORY_MAX_BATCHES];
+static int current_history_batch = 0;
 
 static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
 
@@ -73,7 +94,6 @@ static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
 }
 
 static void greet_me() {
-  static char greet_text[40];
   time_t now = time(NULL);
   struct tm *tms = localtime(&now);
   if (tms->tm_hour < 5) {
@@ -127,7 +147,88 @@ static void schedule_wakeup(int mood) {
   APP_LOG(APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %d: %d.", (int) next_time, (int) wakeup_id);
 }
 
+static void history_save() {
+  persist_write_int(HISTORY_BATCH_COUNT, current_history_batch);
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Writing %d history batches to persistent storage", current_history_batch+1);
+  for (int i=0; i<=current_history_batch; i++) {
+    int result = persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "Persisted history batch %d, %d bytes, result %d", i, (int) sizeof(history[i]), result);
+  }
+}
+
+static void history_load() {
+  current_history_batch = persist_read_int(HISTORY_BATCH_COUNT);
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Reading %d history batches from persistent storage", current_history_batch+1);
+  for (int i=0; i<=current_history_batch; i++) {
+    if (persist_exists(FIRST_HISTORY_BATCH+i)) {
+      int result = persist_read_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
+      APP_LOG(APP_LOG_LEVEL_DEBUG, "Loaded history batch %d, %d bytes, %d events, result %d", i, (int) sizeof(history[i]), history[i].last_event+1, result);
+    }
+    else {
+      APP_LOG(APP_LOG_LEVEL_WARNING, "No history batch %d although current_history_batch %d indicates its existence!", i, current_history_batch);
+    }
+  }
+}
+
+static void history_window_load(Window *window) {
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "History window loading...");
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(window_layer);
+
+  history_scroller = scroll_layer_create(bounds);
+  scroll_layer_set_click_config_onto_window(history_scroller, window);
+
+  GRect frame = GRect(0, 0, bounds.size.w, 3000); // count from history length
+  history_layer = text_layer_create(frame);
+  int history_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+  if ((current_history_batch == 0) && (history[0].last_event == 0)) {
+    strcpy(history_text, "No history recorded.");
+  }
+  else {
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "%d history events", history_events);
+    for (int b=current_history_batch; b>=0; b--) {
+      APP_LOG(APP_LOG_LEVEL_DEBUG, "Processing batch %d", b);
+      for (int e=history[b].last_event; e>=0; e--) {
+        APP_LOG(APP_LOG_LEVEL_DEBUG, "Feeling %d at %d (%d/%d)", history[b].mood[e], (int) history[b].event_time[e], e, b);
+        struct tm *lt = localtime(&history[b].event_time[e]);
+        strftime(timestr, sizeof(timestr), "%V %a %k:%M", lt);
+        // strftime(timestr, sizeof(timestr), "%H:%M", lt);
+        snprintf(event_text, sizeof(event_text), "%s %s\n", timestr, Moods[history[b].mood[e]]);
+        APP_LOG(APP_LOG_LEVEL_DEBUG, "%s", event_text);
+        strncat(history_text, event_text, sizeof(event_text));
+      }
+    }
+  }
+  text_layer_set_text(history_layer, history_text);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "History window loaded with text %s", history_text);
+  text_layer_set_font(history_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
+  text_layer_set_text_color(history_layer, GColorBlack);
+  text_layer_set_background_color(history_layer, GColorWhite);
+  GSize max_size = text_layer_get_content_size(history_layer);
+  max_size.w = frame.size.w;
+  text_layer_set_size(history_layer, max_size);
+  scroll_layer_set_content_size(history_scroller, max_size);
+  scroll_layer_add_child(history_scroller, text_layer_get_layer(history_layer));
+  layer_add_child(window_layer, scroll_layer_get_layer(history_scroller));
+}
+
+static void history_window_unload(Window *window) {
+  text_layer_destroy(history_layer);
+  scroll_layer_destroy(history_scroller);
+}
+
+static void history_show(ClickRecognizerRef recognizer, void *context) {
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Showing history...");
+  history_window = window_create();
+  window_set_window_handlers(history_window, (WindowHandlers) {
+    .load = history_window_load,
+    .unload = history_window_unload,
+  });
+  window_stack_push(history_window, animated);
+}
+
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  text_layer_set_text(greet_layer, "Mood set!\nPushing pin to timeline...");
   layer_mark_dirty(icon_layer);
   text_layer_set_text(mood_layer, Moods[current_mood]);
   DictionaryIterator *iter;
@@ -141,6 +242,22 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   dict_write_end(iter);
   app_message_outbox_send();
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Sent mood %d for time %d to phone!", current_mood, current_time);
+  if (history[current_history_batch].last_event >= HISTORY_BATCH_SIZE-1) {
+    current_history_batch++;
+    if (current_history_batch >= HISTORY_MAX_BATCHES) {
+      for (int i=0; i<HISTORY_MAX_BATCHES-1; i++) {
+        history[i] = history[i+1];
+      }
+    }
+    history[current_history_batch].last_event = 0;
+  }
+  else {
+    history[current_history_batch].last_event++;
+  }
+  history[current_history_batch].event_time[history[current_history_batch].last_event] = time(NULL);
+  history[current_history_batch].mood[history[current_history_batch].last_event] = current_mood;
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "%d moods in current history batch, %d total", history[current_history_batch].last_event+1, current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event+1);
+  history_save();
   schedule_wakeup(current_mood);
 }
 
@@ -164,6 +281,7 @@ static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void click_config_provider(void *context) {
+  window_long_click_subscribe(BUTTON_ID_SELECT, 400, history_show, NULL);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
@@ -172,7 +290,6 @@ static void click_config_provider(void *context) {
 void in_received_handler(DictionaryIterator *received, void *context) {
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Mood sent to phone");
   Tuple *mt = dict_find(received, MOOD);
-  static char greet_text[40];
   strcpy(greet_text, mt->value->cstring);
   text_layer_set_text(greet_layer, greet_text);
 }
@@ -233,6 +350,8 @@ static void init(void) {
   wakeup_service_subscribe(wakeup_handler);
   schedule_wakeup(current_mood);
 
+  history_load();
+
   app_message_register_inbox_received(in_received_handler);
   app_message_register_inbox_dropped(in_dropped_handler);
   app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
@@ -256,7 +375,6 @@ static void init(void) {
     .load = window_load,
     .unload = window_unload,
   });
-  const bool animated = true;
   window_stack_push(window, animated);
 }
 
