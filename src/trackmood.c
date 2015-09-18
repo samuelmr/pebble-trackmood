@@ -2,15 +2,21 @@
 #define HISTORY_BATCH_SIZE 25
 #define HISTORY_MAX_BATCHES 16
 #define EVENT_TEXT_SIZE 30
+#define PIXELS_PER_MOOD_LEVEL 25
+#define CIRCLE_RADIUS 15
 
 static Window *window;
 static Window *history_window;
+static Window *graph_window;
 static ScrollLayer *history_scroller;
 static TextLayer *history_layer;
 static TextLayer *greet_layer;
 static TextLayer *mood_layer;
 static Layer *icon_layer;
+static Layer *graph_layer;
+static GRect graph_bounds;
 static GDrawCommandImage *mood_icon;
+
 static WakeupId wakeup_id;
 static const VibePattern CUSTOM_PATTERN = {
   .durations = (uint32_t[]) {100, 50, 250, 150, 100, 50, 250, 150, 100},
@@ -21,7 +27,10 @@ static char event_text[EVENT_TEXT_SIZE];
 static char history_text[HISTORY_MAX_BATCHES * HISTORY_BATCH_SIZE * EVENT_TEXT_SIZE];
 static char timestr[15];
 static const int16_t ICON_DIMENSIONS = 100;
-static const bool animated = true;
+static const bool animated = false;
+static int seconds_per_pixel = 1; // will be changed based on data
+static int start_time;
+static int end_time;
 
 enum Mood {
   TERRIBLE = 0,
@@ -48,6 +57,7 @@ enum KEYS {
 
 const char *Moods[] = {"Terrible", "Bad", "OK", "Great", "Awesome"};
 const char *Times[] = {"morning", "afternoon", "day", "evening", "night"};
+GColor Mood_colors[5];
 
 int current_mood = GREAT;
 int current_time = DAY;
@@ -59,12 +69,15 @@ typedef struct History {
 } __attribute__((__packed__)) History;
 
 static History history[HISTORY_MAX_BATCHES];
-static int current_history_batch = 0;
+static int current_history_batch = -1;
+
+typedef struct Selected {
+  int b;
+  int e;
+} Selected;
+Selected selected;
 
 static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
-
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Updating icon to %d", current_mood);
-
   switch (current_mood) {
     case TERRIBLE:
       mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_TERRIBLE);
@@ -91,6 +104,59 @@ static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
   gdraw_command_image_draw(ctx, temp_copy, GPoint(0, 0));
   free(temp_copy);
   return;
+}
+
+static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
+  GFont text_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  int orig_x = CIRCLE_RADIUS;
+  int orig_y = graph_bounds.size.h - CIRCLE_RADIUS;
+  int num_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Total %d events in history", num_events);
+  GPoint points[num_events];
+  int b = 0;
+  int e = 0;
+  int num_points = 0;
+  if (start_time == 0) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "Invalid data in history, start time of first event is 0!");
+    return;
+  }
+  for (int i=0; i<num_events; i++) {
+    if (e == HISTORY_BATCH_SIZE) {
+      b++;
+      e = 0;
+    }
+    if ((int) history[b].event_time[e] == 0) {
+      // should not happen
+      e++;
+      continue;
+    }
+    int seconds = (int) (history[b].event_time[e] - start_time);
+    int x = orig_x + seconds / seconds_per_pixel;
+    int y = orig_y - history[b].mood[e] * PIXELS_PER_MOOD_LEVEL;
+    points[num_points] = GPoint(x, y);
+    graphics_context_set_fill_color(ctx, Mood_colors[history[b].mood[e]]);
+    int radius = CIRCLE_RADIUS;
+    if ((b == selected.b) && (e == selected.e)) {
+      radius += radius/2;
+      graphics_context_set_text_color(ctx, GColorWhite);
+      GRect text_box = GRect(x-72, 0, 144, 20);
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "Feeling %d at %d (%d/%d)", history[b].mood[e], (int) history[b].event_time[e], e, b);
+      struct tm *lt = localtime(&history[b].event_time[e]);
+      strftime(timestr, sizeof(timestr), "%b %e %k:%M", lt);
+      snprintf(event_text, sizeof(event_text), "%s\n%s", Moods[history[b].mood[e]], timestr);
+      graphics_draw_text(ctx, event_text, text_font, text_box, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+    }
+    graphics_fill_circle(ctx, points[num_points], radius);
+    num_points++;
+    e++;
+  }
+  GPathInfo line_info = {
+    .num_points = num_points,
+    .points = points
+  };
+  GPath *line = gpath_create(&line_info);
+  graphics_context_set_stroke_color(ctx, GColorWhite);
+  gpath_draw_outline_open(ctx, line);
 }
 
 static void greet_me() {
@@ -121,24 +187,19 @@ static void schedule_wakeup(int mood) {
   struct tm *tms = localtime(&now);
   if (tms->tm_hour < 8) {
     next_time = clock_to_timestamp(TODAY, 9, 0);
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 AM today: %d", (int) next_time);
   }
   else if (tms->tm_hour < 12) {
     next_time = clock_to_timestamp(TODAY, 13, 0);
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 1 PM today: %d", (int) next_time);
   }
   else if (tms->tm_hour < 16) {
     next_time = clock_to_timestamp(TODAY, 17, 0);
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 5 PM today: %d", (int) next_time);
   }
   else if (tms->tm_hour < 20) {
     next_time = clock_to_timestamp(TODAY, 21, 0);
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 PM today: %d", (int) next_time);
   }
   else {
     int tomorrow = tms->tm_wday + 2;
     tomorrow = (tomorrow <= 7) ? tomorrow : 1;
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "After eight, weekday is %d, tomorrow is %d", tms->tm_wday, tomorrow);
     next_time = clock_to_timestamp(tomorrow, 9, 0);
     APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 AM tomorrow: %d", (int) next_time);
   }
@@ -149,29 +210,37 @@ static void schedule_wakeup(int mood) {
 
 static void history_save() {
   persist_write_int(HISTORY_BATCH_COUNT, current_history_batch);
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Writing %d history batches to persistent storage", current_history_batch+1);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Writing %d history batches to persistent storage", current_history_batch+1);
   for (int i=0; i<=current_history_batch; i++) {
-    int result = persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "Persisted history batch %d, %d bytes, result %d", i, (int) sizeof(history[i]), result);
+    // int result = persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Persisted history batch %d, %d bytes, result %d", i, (int) sizeof(history[i]), result);
+    persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
   }
 }
 
 static void history_load() {
-  current_history_batch = persist_read_int(HISTORY_BATCH_COUNT);
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Reading %d history batches from persistent storage", current_history_batch+1);
+  if (persist_exists(HISTORY_BATCH_COUNT)) {
+    current_history_batch = persist_read_int(HISTORY_BATCH_COUNT);
+  }
+  if (current_history_batch < 0) {
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "No history in persistent storage: %d", current_history_batch);
+    return;
+  }
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Reading %d history batches from persistent storage", current_history_batch+1);
   for (int i=0; i<=current_history_batch; i++) {
     if (persist_exists(FIRST_HISTORY_BATCH+i)) {
-      int result = persist_read_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
-      APP_LOG(APP_LOG_LEVEL_DEBUG, "Loaded history batch %d, %d bytes, %d events, result %d", i, (int) sizeof(history[i]), history[i].last_event+1, result);
+      // int result = persist_read_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "Loaded history batch %d, %d bytes, %d events, result %d", i, (int) sizeof(history[i]), history[i].last_event+1, result);
+      persist_read_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
     }
     else {
       APP_LOG(APP_LOG_LEVEL_WARNING, "No history batch %d although current_history_batch %d indicates its existence!", i, current_history_batch);
     }
   }
+  selected = (Selected) {current_history_batch, history[current_history_batch].last_event};
 }
 
 static void history_window_load(Window *window) {
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "History window loading...");
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
 
@@ -180,27 +249,24 @@ static void history_window_load(Window *window) {
 
   GRect frame = GRect(0, 0, bounds.size.w, 3000); // count from history length
   history_layer = text_layer_create(frame);
-  int history_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
   if ((current_history_batch == 0) && (history[0].last_event == 0)) {
     strcpy(history_text, "No history recorded.");
   }
   else {
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "%d history events", history_events);
+    // int history_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "%d history events", history_events);
     for (int b=current_history_batch; b>=0; b--) {
-      APP_LOG(APP_LOG_LEVEL_DEBUG, "Processing batch %d", b);
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "Processing batch %d", b);
       for (int e=history[b].last_event; e>=0; e--) {
-        APP_LOG(APP_LOG_LEVEL_DEBUG, "Feeling %d at %d (%d/%d)", history[b].mood[e], (int) history[b].event_time[e], e, b);
+        // APP_LOG(APP_LOG_LEVEL_DEBUG, "Feeling %d at %d (%d/%d)", history[b].mood[e], (int) history[b].event_time[e], e, b);
         struct tm *lt = localtime(&history[b].event_time[e]);
         strftime(timestr, sizeof(timestr), "%V %a %k:%M", lt);
-        // strftime(timestr, sizeof(timestr), "%H:%M", lt);
         snprintf(event_text, sizeof(event_text), "%s %s\n", timestr, Moods[history[b].mood[e]]);
-        APP_LOG(APP_LOG_LEVEL_DEBUG, "%s", event_text);
         strncat(history_text, event_text, sizeof(event_text));
       }
     }
   }
   text_layer_set_text(history_layer, history_text);
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "History window loaded with text %s", history_text);
   text_layer_set_font(history_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
   text_layer_set_text_color(history_layer, GColorBlack);
   text_layer_set_background_color(history_layer, GColorWhite);
@@ -218,13 +284,121 @@ static void history_window_unload(Window *window) {
 }
 
 static void history_show(ClickRecognizerRef recognizer, void *context) {
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Showing history...");
   history_window = window_create();
   window_set_window_handlers(history_window, (WindowHandlers) {
     .load = history_window_load,
     .unload = history_window_unload,
   });
   window_stack_push(history_window, animated);
+}
+
+static void move_graph() {
+  int seconds = (int) (history[selected.b].event_time[selected.e] - start_time);
+  Layer *window_layer = window_get_root_layer(graph_window);
+  GRect frame = layer_get_bounds(window_layer);
+  graph_bounds.origin.x = frame.size.w/2 - seconds / seconds_per_pixel - CIRCLE_RADIUS * 2;
+  layer_set_bounds(graph_layer, graph_bounds);
+}
+
+static void history_scroll_forward(ClickRecognizerRef recognizer, void *context) {
+  if (selected.e < history[selected.b].last_event) {
+    selected.e++;
+  }
+  else if (selected.b < current_history_batch) {
+    selected.b++;
+    selected.e = 0;
+  }
+  else {
+    return;
+  }
+  move_graph();
+}
+
+static void history_scroll_back(ClickRecognizerRef recognizer, void *context) {
+  if (selected.e > 0) {
+    selected.e--;
+  }
+  else if (selected.b > 0) {
+    selected.b--;
+    selected.e = history[selected.b].last_event;
+  }
+  else {
+    return;
+  }
+  move_graph();
+}
+
+static void graph_window_load(Window *window) {
+  Layer *window_layer = window_get_root_layer(window);
+  GRect frame = layer_get_bounds(window_layer);
+  graph_layer = layer_create(frame);
+  start_time = (int) history[0].event_time[0];
+  end_time = (int) history[current_history_batch].event_time[history[current_history_batch].last_event];
+  int diff = (int) (end_time - start_time);
+  if (diff < 60 * 60) {
+    seconds_per_pixel = 1;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to hour view");
+  }
+  else if (diff < 60 * 60 * 12) {
+    seconds_per_pixel = 10;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to half day view");
+  }
+  else if (diff < 60 * 60 * 24) {
+    seconds_per_pixel = 60;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to day view");
+  }
+  else if (diff < 60 * 60 * 24 * 7) {
+    seconds_per_pixel = 60 * 60;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to week view");
+  }
+  else if (diff < 60 * 60 * 24 * 30) {
+    seconds_per_pixel = 60 * 60 * 10;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to month view");
+  }
+  else if (diff < 60 * 60 * 24 * 365) {
+    seconds_per_pixel = 60 * 60 * 24;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to year view");
+  }
+  else {
+    seconds_per_pixel = diff/1000;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to long view");
+  }
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "History spans %d seconds (%d pixels) from %d to %d", (end_time - start_time), diff/seconds_per_pixel, start_time, end_time);
+  int orig_x = frame.size.w - diff / seconds_per_pixel - CIRCLE_RADIUS * 2;
+  int orig_y = 0;
+  int size_w = diff / seconds_per_pixel + CIRCLE_RADIUS * 2;
+  int size_h = frame.size.h;
+  graph_bounds = GRect(orig_x, orig_y, size_w, size_h);
+  layer_set_bounds(graph_layer, graph_bounds);
+  layer_set_clips(graph_layer, true);
+  layer_add_child(window_layer, graph_layer);
+  layer_set_update_proc(graph_layer, graph_layer_update_proc);
+}
+
+static void graph_window_unload(Window *window) {
+  layer_destroy(graph_layer);
+}
+
+static void graph_click_config_provider(void *context) {
+  window_long_click_subscribe(BUTTON_ID_SELECT, 400, history_show, NULL);
+  window_single_click_subscribe(BUTTON_ID_SELECT, history_show);
+  window_single_click_subscribe(BUTTON_ID_UP, history_scroll_back);
+  window_single_click_subscribe(BUTTON_ID_DOWN, history_scroll_forward);
+}
+
+static void graph_show(ClickRecognizerRef recognizer, void *context) {
+  if (current_history_batch < 0) {
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "No history recorded...");
+    return;
+  }
+  graph_window = window_create();
+  window_set_background_color(graph_window, GColorBlack);
+  window_set_window_handlers(graph_window, (WindowHandlers) {
+    .load = graph_window_load,
+    .unload = graph_window_unload,
+  });
+  window_stack_push(graph_window, animated);
+  window_set_click_config_provider(graph_window, graph_click_config_provider);
 }
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -241,8 +415,11 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   dict_write_int8(iter, TIME, current_time);
   dict_write_end(iter);
   app_message_outbox_send();
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Sent mood %d for time %d to phone!", current_mood, current_time);
-  if (history[current_history_batch].last_event >= HISTORY_BATCH_SIZE-1) {
+  if (current_history_batch < 0) {
+    current_history_batch = 0;
+    history[current_history_batch].last_event = 0;
+  }
+  else if (history[current_history_batch].last_event >= HISTORY_BATCH_SIZE-1) {
     current_history_batch++;
     if (current_history_batch >= HISTORY_MAX_BATCHES) {
       for (int i=0; i<HISTORY_MAX_BATCHES-1; i++) {
@@ -256,7 +433,7 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   }
   history[current_history_batch].event_time[history[current_history_batch].last_event] = time(NULL);
   history[current_history_batch].mood[history[current_history_batch].last_event] = current_mood;
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "%d moods in current history batch, %d total", history[current_history_batch].last_event+1, current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event+1);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "%d moods in current history batch, %d total", history[current_history_batch].last_event+1, current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event+1);
   history_save();
   schedule_wakeup(current_mood);
 }
@@ -281,14 +458,13 @@ static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void click_config_provider(void *context) {
-  window_long_click_subscribe(BUTTON_ID_SELECT, 400, history_show, NULL);
+  window_long_click_subscribe(BUTTON_ID_SELECT, 400, graph_show, NULL);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
 }
 
 void in_received_handler(DictionaryIterator *received, void *context) {
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Mood sent to phone");
   Tuple *mt = dict_find(received, MOOD);
   strcpy(greet_text, mt->value->cstring);
   text_layer_set_text(greet_layer, greet_text);
@@ -346,6 +522,11 @@ static void window_unload(Window *window) {
 
 static void init(void) {
   current_mood = persist_exists(MOOD) ? persist_read_int(MOOD) : current_mood;
+  Mood_colors[TERRIBLE] = GColorDarkCandyAppleRed;
+  Mood_colors[BAD] = GColorOrange;
+  Mood_colors[OK] = GColorIcterine;
+  Mood_colors[GREAT] = GColorBrightGreen;
+  Mood_colors[AWESOME] = GColorIslamicGreen;
 
   wakeup_service_subscribe(wakeup_handler);
   schedule_wakeup(current_mood);
@@ -385,7 +566,6 @@ static void deinit(void) {
 
 int main(void) {
   init();
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Done initializing, pushed window: %p", window);
   app_event_loop();
   deinit();
 }
