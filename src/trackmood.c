@@ -16,7 +16,8 @@ static Layer *icon_layer;
 static Layer *graph_layer;
 static GRect graph_bounds;
 static GDrawCommandImage *mood_icon;
-
+static GFont text_font;
+static GRect text_box;
 static WakeupId wakeup_id;
 static const VibePattern CUSTOM_PATTERN = {
   .durations = (uint32_t[]) {100, 50, 250, 150, 100, 50, 250, 150, 100},
@@ -25,7 +26,7 @@ static const VibePattern CUSTOM_PATTERN = {
 static char greet_text[40];
 static char event_text[EVENT_TEXT_SIZE];
 static char history_text[HISTORY_MAX_BATCHES * HISTORY_BATCH_SIZE * EVENT_TEXT_SIZE];
-static char timestr[15];
+static char timestr[18];
 static const int16_t ICON_DIMENSIONS = 100;
 static const bool animated = false;
 static int seconds_per_pixel = 1; // will be changed based on data
@@ -62,6 +63,10 @@ GColor Mood_colors[5];
 int current_mood = GREAT;
 int current_time = DAY;
 
+static int max_zoom_level = 3;
+static int zoom_seconds_per_pixel[] = {50, 500, 5000, 50000};
+static int zoom_level = 0;
+
 typedef struct History {
   time_t event_time[HISTORY_BATCH_SIZE];
   int mood[HISTORY_BATCH_SIZE];
@@ -81,16 +86,16 @@ static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
   switch (current_mood) {
     case TERRIBLE:
       mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_TERRIBLE);
-	  break;
+      break;
     case BAD:
       mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_BAD);
-	  break;
+      break;
     case GREAT:
       mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_GREAT);
-	  break;
+      break;
     case AWESOME:
       mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_AWESOME);
-	  break;
+      break;
     default:
     case OK:
       mood_icon = gdraw_command_image_create_with_resource(RESOURCE_ID_ICON_OK);
@@ -107,7 +112,6 @@ static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
 }
 
 static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
-  GFont text_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   int orig_x = CIRCLE_RADIUS;
   int orig_y = graph_bounds.size.h - CIRCLE_RADIUS;
   int num_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
@@ -131,22 +135,24 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
       continue;
     }
     int seconds = (int) (history[b].event_time[e] - start_time);
-    int x = orig_x + seconds / seconds_per_pixel;
+    int x = orig_x + seconds / seconds_per_pixel + CIRCLE_RADIUS;
     int y = orig_y - history[b].mood[e] * PIXELS_PER_MOOD_LEVEL;
     points[num_points] = GPoint(x, y);
     graphics_context_set_fill_color(ctx, Mood_colors[history[b].mood[e]]);
+    text_box = GRect(x-72, 0, 144, 20);
     int radius = CIRCLE_RADIUS;
     if ((b == selected.b) && (e == selected.e)) {
       radius += radius/2;
-      graphics_context_set_text_color(ctx, GColorWhite);
-      GRect text_box = GRect(x-72, 0, 144, 20);
+      graphics_context_set_text_color(ctx, GColorLightGray);
       // APP_LOG(APP_LOG_LEVEL_DEBUG, "Feeling %d at %d (%d/%d)", history[b].mood[e], (int) history[b].event_time[e], e, b);
       struct tm *lt = localtime(&history[b].event_time[e]);
-      strftime(timestr, sizeof(timestr), "%b %e %k:%M", lt);
+      strftime(timestr, sizeof(timestr), "%a %b %e %k:%M", lt);
       snprintf(event_text, sizeof(event_text), "%s\n%s", Moods[history[b].mood[e]], timestr);
-      graphics_draw_text(ctx, event_text, text_font, text_box, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
     }
     graphics_fill_circle(ctx, points[num_points], radius);
+    if ((b == selected.b) && (e == selected.e)) {
+      graphics_draw_text(ctx, event_text, text_font, text_box, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+    }
     num_points++;
     e++;
   }
@@ -155,7 +161,8 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
     .points = points
   };
   GPath *line = gpath_create(&line_info);
-  graphics_context_set_stroke_color(ctx, GColorWhite);
+  graphics_context_set_stroke_color(ctx, GColorLightGray);
+  graphics_context_set_stroke_width(ctx, 3);
   gpath_draw_outline_open(ctx, line);
 }
 
@@ -300,6 +307,19 @@ static void move_graph() {
   layer_set_bounds(graph_layer, graph_bounds);
 }
 
+static void history_zoom(ClickRecognizerRef recognizer, void *context) {
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Zoom level is %d: %d seconds per pixel", zoom_level, seconds_per_pixel);
+  zoom_level++;
+  int diff = (int) (end_time - start_time);
+  Layer *window_layer = window_get_root_layer(graph_window);
+  GRect frame = layer_get_bounds(window_layer);
+  if ((zoom_level > max_zoom_level) || (diff/seconds_per_pixel  < frame.size.w)) {
+    zoom_level = 0;
+  }
+  seconds_per_pixel = zoom_seconds_per_pixel[zoom_level];
+  move_graph();
+}
+
 static void history_scroll_forward(ClickRecognizerRef recognizer, void *context) {
   if (selected.e < history[selected.b].last_event) {
     selected.e++;
@@ -335,35 +355,7 @@ static void graph_window_load(Window *window) {
   start_time = (int) history[0].event_time[0];
   end_time = (int) history[current_history_batch].event_time[history[current_history_batch].last_event];
   int diff = (int) (end_time - start_time);
-  if (diff < 60 * 60) {
-    seconds_per_pixel = 1;
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to hour view");
-  }
-  else if (diff < 60 * 60 * 12) {
-    seconds_per_pixel = 10;
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to half day view");
-  }
-  else if (diff < 60 * 60 * 24) {
-    seconds_per_pixel = 60;
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to day view");
-  }
-  else if (diff < 60 * 60 * 24 * 7) {
-    seconds_per_pixel = 60 * 60;
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to week view");
-  }
-  else if (diff < 60 * 60 * 24 * 30) {
-    seconds_per_pixel = 60 * 60 * 10;
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to month view");
-  }
-  else if (diff < 60 * 60 * 24 * 365) {
-    seconds_per_pixel = 60 * 60 * 24;
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to year view");
-  }
-  else {
-    seconds_per_pixel = diff/1000;
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set zoom to long view");
-  }
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "History spans %d seconds (%d pixels) from %d to %d", (end_time - start_time), diff/seconds_per_pixel, start_time, end_time);
+  seconds_per_pixel = zoom_seconds_per_pixel[zoom_level];
   int orig_x = frame.size.w - diff / seconds_per_pixel - CIRCLE_RADIUS * 2;
   int orig_y = 0;
   int size_w = diff / seconds_per_pixel + CIRCLE_RADIUS * 2;
@@ -381,7 +373,7 @@ static void graph_window_unload(Window *window) {
 
 static void graph_click_config_provider(void *context) {
   window_long_click_subscribe(BUTTON_ID_SELECT, 400, history_show, NULL);
-  window_single_click_subscribe(BUTTON_ID_SELECT, history_show);
+  window_single_click_subscribe(BUTTON_ID_SELECT, history_zoom);
   window_single_click_subscribe(BUTTON_ID_UP, history_scroll_back);
   window_single_click_subscribe(BUTTON_ID_DOWN, history_scroll_forward);
 }
@@ -527,6 +519,7 @@ static void init(void) {
   Mood_colors[OK] = GColorIcterine;
   Mood_colors[GREAT] = GColorBrightGreen;
   Mood_colors[AWESOME] = GColorIslamicGreen;
+  text_font = fonts_get_system_font(FONT_KEY_GOTHIC_18);
 
   wakeup_service_subscribe(wakeup_handler);
   schedule_wakeup(current_mood);
