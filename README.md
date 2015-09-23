@@ -19,7 +19,7 @@ Usage
 Details
 =======
 
-History contains at most 400 entries. Oldest entries are discarded
+History contains at most 200 entries. Oldest entries are discarded
 automatically.
 
 Your moods are also stored in your timeline (for one day) so you can see how

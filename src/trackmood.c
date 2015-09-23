@@ -1,9 +1,10 @@
 #include <pebble.h>
 #define HISTORY_BATCH_SIZE 25
-#define HISTORY_MAX_BATCHES 16
+#define HISTORY_MAX_BATCHES 8
 #define EVENT_TEXT_SIZE 30
 #define PIXELS_PER_MOOD_LEVEL 25
 #define CIRCLE_RADIUS 15
+#define MAX_GRAPH_PIXELS 4000
 
 static Window *window;
 static Window *history_window;
@@ -63,8 +64,9 @@ GColor Mood_colors[5];
 int current_mood = GREAT;
 int current_time = DAY;
 
-static int max_zoom_level = 3;
-static int zoom_seconds_per_pixel[] = {50, 500, 5000, 50000};
+static int max_zoom_level = 4;
+static int min_zoom_level = 0;
+static int zoom_seconds_per_pixel[] = {100, 200, 400, 800, 1600};
 static int zoom_level = 0;
 
 typedef struct History {
@@ -116,6 +118,12 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
   int orig_y = graph_bounds.size.h - CIRCLE_RADIUS;
   int num_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Total %d events in history", num_events);
+  GRect bounds = layer_get_bounds(graph_layer);
+  GRect frame = layer_get_frame(graph_layer);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Bounds: %d, %d, %d, %d", bounds.origin.x, bounds.origin.y, bounds.size.w, bounds.size.h);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Frame: %d, %d, %d, %d", frame.origin.x, frame.origin.y, frame.size.w, frame.size.h);
+  // min_visible_x = bounds.origin.x
+
   GPoint points[num_events];
   int b = 0;
   int e = 0;
@@ -129,33 +137,57 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
       b++;
       e = 0;
     }
-    if ((int) history[b].event_time[e] == 0) {
+    if ((int) history[b].event_time[e] < start_time) {
       // should not happen
+      APP_LOG(APP_LOG_LEVEL_WARNING, "Invalid event time %d (before start time %d)", (int) history[b].event_time[e], start_time);
       e++;
       continue;
     }
     int seconds = (int) (history[b].event_time[e] - start_time);
     int x = orig_x + seconds / seconds_per_pixel + CIRCLE_RADIUS;
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "X is %d", x);
     int y = orig_y - history[b].mood[e] * PIXELS_PER_MOOD_LEVEL;
     points[num_points] = GPoint(x, y);
-    graphics_context_set_fill_color(ctx, Mood_colors[history[b].mood[e]]);
-    text_box = GRect(x-72, 0, 144, 20);
-    int radius = CIRCLE_RADIUS;
-    if ((b == selected.b) && (e == selected.e)) {
-      radius += radius/2;
-      graphics_context_set_text_color(ctx, GColorLightGray);
+    if ((x+bounds.origin.x < (frame.origin.x-CIRCLE_RADIUS)) || (x+bounds.origin.x > (frame.size.w+CIRCLE_RADIUS))) {
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "Not printing %d/%d: %d", e, b, x);
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "%d is less than %d or greater than %d", x+bounds.origin.x, frame.origin.x-CIRCLE_RADIUS, frame.size.w+CIRCLE_RADIUS);
+      e++;
+      num_points++;
+      continue;
+    }
+    else {
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "Printing %d/%d: %d (%d)", e, b, x, history[b].mood[e]);
+      graphics_context_set_fill_color(ctx, Mood_colors[history[b].mood[e]]);
+      text_box = GRect(x-72, 0, 144, 20);
+      int radius = CIRCLE_RADIUS;
+
+      if ((b == selected.b) && (e == selected.e)) {
+        radius += radius/2;
+        graphics_context_set_text_color(ctx, GColorLightGray);
+        struct tm *lt = localtime(&history[b].event_time[e]);
+        strftime(timestr, sizeof(timestr), "%a %b %e %k:%M", lt);
+        snprintf(event_text, sizeof(event_text), "%s\n%s", Moods[history[b].mood[e]], timestr);
+      }
       // APP_LOG(APP_LOG_LEVEL_DEBUG, "Feeling %d at %d (%d/%d)", history[b].mood[e], (int) history[b].event_time[e], e, b);
-      struct tm *lt = localtime(&history[b].event_time[e]);
-      strftime(timestr, sizeof(timestr), "%a %b %e %k:%M", lt);
-      snprintf(event_text, sizeof(event_text), "%s\n%s", Moods[history[b].mood[e]], timestr);
+      graphics_fill_circle(ctx, points[num_points], radius);
+      if ((b == selected.b) && (e == selected.e)) {
+        graphics_draw_text(ctx, event_text, text_font, text_box, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+      }
+      num_points++;
+      e++;
     }
-    graphics_fill_circle(ctx, points[num_points], radius);
-    if ((b == selected.b) && (e == selected.e)) {
-      graphics_draw_text(ctx, event_text, text_font, text_box, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
-    }
-    num_points++;
-    e++;
   }
+
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "%d points in line", num_points);
+
+  /*
+
+  for (int p=0; p<num_points; p++) {
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "point %d: %d, %d)", p, points[p].x, points[p].y);
+  }
+
+*/
+
   GPathInfo line_info = {
     .num_points = num_points,
     .points = points
@@ -208,11 +240,11 @@ static void schedule_wakeup(int mood) {
     int tomorrow = tms->tm_wday + 2;
     tomorrow = (tomorrow <= 7) ? tomorrow : 1;
     next_time = clock_to_timestamp(tomorrow, 9, 0);
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 AM tomorrow: %d", (int) next_time);
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 AM tomorrow: %d", (int) next_time);
   }
   wakeup_cancel_all();
   wakeup_id = wakeup_schedule(next_time, (int32_t) mood, true);
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %d: %d.", (int) next_time, (int) wakeup_id);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %d: %d.", (int) next_time, (int) wakeup_id);
 }
 
 static void history_save() {
@@ -234,17 +266,21 @@ static void history_load() {
     return;
   }
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Reading %d history batches from persistent storage", current_history_batch+1);
+  int total_bytes_read = 0;
   for (int i=0; i<=current_history_batch; i++) {
     if (persist_exists(FIRST_HISTORY_BATCH+i)) {
       // int result = persist_read_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
       // APP_LOG(APP_LOG_LEVEL_DEBUG, "Loaded history batch %d, %d bytes, %d events, result %d", i, (int) sizeof(history[i]), history[i].last_event+1, result);
       persist_read_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
+      total_bytes_read += sizeof(history[i]);
     }
     else {
       APP_LOG(APP_LOG_LEVEL_WARNING, "No history batch %d although current_history_batch %d indicates its existence!", i, current_history_batch);
     }
   }
   selected = (Selected) {current_history_batch, history[current_history_batch].last_event};
+  int events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Total history: %d batches, %d events, %d bytes", current_history_batch+1, events, total_bytes_read);
 }
 
 static void history_window_load(Window *window) {
@@ -254,14 +290,17 @@ static void history_window_load(Window *window) {
   history_scroller = scroll_layer_create(bounds);
   scroll_layer_set_click_config_onto_window(history_scroller, window);
 
-  GRect frame = GRect(0, 0, bounds.size.w, 3000); // count from history length
-  history_layer = text_layer_create(frame);
-  if ((current_history_batch == 0) && (history[0].last_event == 0)) {
+  int items = current_history_batch * HISTORY_BATCH_SIZE +
+    history[current_history_batch].last_event + 1;
+  GSize max_size = GSize(bounds.size.w, items * 19); // font size is 18
+  history_layer = text_layer_create(GRect(0, 0, max_size.w, max_size.h));
+  if ((current_history_batch == 0) && (history[0].last_event < 0)) {
     strcpy(history_text, "No history recorded.");
   }
   else {
     // int history_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
     // APP_LOG(APP_LOG_LEVEL_DEBUG, "%d history events", history_events);
+    strcpy(history_text, "");
     for (int b=current_history_batch; b>=0; b--) {
       // APP_LOG(APP_LOG_LEVEL_DEBUG, "Processing batch %d", b);
       for (int e=history[b].last_event; e>=0; e--) {
@@ -277,8 +316,8 @@ static void history_window_load(Window *window) {
   text_layer_set_font(history_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
   text_layer_set_text_color(history_layer, GColorBlack);
   text_layer_set_background_color(history_layer, GColorWhite);
-  GSize max_size = text_layer_get_content_size(history_layer);
-  max_size.w = frame.size.w;
+  max_size = text_layer_get_content_size(history_layer);
+  max_size.w = bounds.size.w;
   text_layer_set_size(history_layer, max_size);
   scroll_layer_set_content_size(history_scroller, max_size);
   scroll_layer_add_child(history_scroller, text_layer_get_layer(history_layer));
@@ -301,6 +340,17 @@ static void history_show(ClickRecognizerRef recognizer, void *context) {
 
 static void move_graph() {
   int seconds = (int) (history[selected.b].event_time[selected.e] - start_time);
+/*
+  int start_time = (int) history[0].event_time[0];
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Start time is %d; selected %d/%d (%d)", start_time, selected.e, selected.b, history[selected.b].mood[selected.e]);
+  int selected_time = (int) history[selected.b].event_time[selected.e];
+  int seconds = selected_time - start_time;
+  if (seconds / seconds_per_pixel > MAX_GRAPH_PIXELS) {
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "Max graph width %d exceeded, changing start_time from %d to %d", MAX_GRAPH_PIXELS, start_time, selected_time - (seconds_per_pixel/MAX_GRAPH_PIXELS));
+    seconds = (seconds_per_pixel/MAX_GRAPH_PIXELS);
+    start_time = selected_time - seconds;
+  }
+*/
   Layer *window_layer = window_get_root_layer(graph_window);
   GRect frame = layer_get_bounds(window_layer);
   graph_bounds.origin.x = frame.size.w/2 - seconds / seconds_per_pixel - CIRCLE_RADIUS * 2;
@@ -308,15 +358,15 @@ static void move_graph() {
 }
 
 static void history_zoom(ClickRecognizerRef recognizer, void *context) {
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Zoom level is %d: %d seconds per pixel", zoom_level, seconds_per_pixel);
   zoom_level++;
   int diff = (int) (end_time - start_time);
   Layer *window_layer = window_get_root_layer(graph_window);
   GRect frame = layer_get_bounds(window_layer);
-  if ((zoom_level > max_zoom_level) || (diff/seconds_per_pixel  < frame.size.w)) {
-    zoom_level = 0;
+  if ((zoom_level > max_zoom_level) || (diff/seconds_per_pixel < frame.size.w)) {
+    zoom_level = min_zoom_level;
   }
   seconds_per_pixel = zoom_seconds_per_pixel[zoom_level];
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Zoom level is %d: %d seconds per pixel", zoom_level, seconds_per_pixel);
   move_graph();
 }
 
@@ -355,15 +405,20 @@ static void graph_window_load(Window *window) {
   start_time = (int) history[0].event_time[0];
   end_time = (int) history[current_history_batch].event_time[history[current_history_batch].last_event];
   int diff = (int) (end_time - start_time);
+  while (diff / zoom_seconds_per_pixel[min_zoom_level] > MAX_GRAPH_PIXELS) {
+    min_zoom_level++;
+  }
+  zoom_level = min_zoom_level;
   seconds_per_pixel = zoom_seconds_per_pixel[zoom_level];
   int orig_x = frame.size.w - diff / seconds_per_pixel - CIRCLE_RADIUS * 2;
   int orig_y = 0;
-  int size_w = diff / seconds_per_pixel + CIRCLE_RADIUS * 2;
+  int size_w = diff / seconds_per_pixel + CIRCLE_RADIUS * 4;
   int size_h = frame.size.h;
   graph_bounds = GRect(orig_x, orig_y, size_w, size_h);
   layer_set_bounds(graph_layer, graph_bounds);
   layer_set_clips(graph_layer, true);
   layer_add_child(window_layer, graph_layer);
+  move_graph();
   layer_set_update_proc(graph_layer, graph_layer_update_proc);
 }
 
@@ -416,7 +471,9 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
     if (current_history_batch >= HISTORY_MAX_BATCHES) {
       for (int i=0; i<HISTORY_MAX_BATCHES-1; i++) {
         history[i] = history[i+1];
+        persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
       }
+      current_history_batch--;
     }
     history[current_history_batch].last_event = 0;
   }
@@ -553,8 +610,14 @@ static void init(void) {
 }
 
 static void deinit(void) {
-  window_destroy(window);
   persist_write_int(MOOD, current_mood);
+  window_destroy(window);
+  if (history_window) {
+    window_destroy(history_window);
+  }
+  if (graph_window) {
+    window_destroy(graph_window);
+  }
 }
 
 int main(void) {
