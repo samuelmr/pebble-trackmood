@@ -19,6 +19,7 @@ static GRect graph_bounds;
 static GDrawCommandImage *mood_icon;
 static GFont text_font;
 static GRect text_box;
+static GPath *line;
 static WakeupId wakeup_id;
 static const VibePattern CUSTOM_PATTERN = {
   .durations = (uint32_t[]) {100, 50, 250, 150, 100, 50, 250, 150, 100},
@@ -26,7 +27,7 @@ static const VibePattern CUSTOM_PATTERN = {
 };
 static char greet_text[40];
 static char event_text[EVENT_TEXT_SIZE];
-static char history_text[HISTORY_MAX_BATCHES * HISTORY_BATCH_SIZE * EVENT_TEXT_SIZE];
+static char history_text[HISTORY_MAX_BATCHES * HISTORY_BATCH_SIZE * EVENT_TEXT_SIZE + 9];
 static char timestr[18];
 static const int16_t ICON_DIMENSIONS = 100;
 static const bool animated = false;
@@ -110,6 +111,7 @@ static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_antialiased(ctx, true);
   gdraw_command_image_draw(ctx, temp_copy, GPoint(0, 0));
   free(temp_copy);
+  free(mood_icon);
   return;
 }
 
@@ -192,7 +194,7 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
     .num_points = num_points,
     .points = points
   };
-  GPath *line = gpath_create(&line_info);
+  line = gpath_create(&line_info);
   graphics_context_set_stroke_color(ctx, GColorLightGray);
   graphics_context_set_stroke_width(ctx, 3);
   gpath_draw_outline_open(ctx, line);
@@ -255,6 +257,7 @@ static void history_save() {
     // APP_LOG(APP_LOG_LEVEL_DEBUG, "Persisted history batch %d, %d bytes, result %d", i, (int) sizeof(history[i]), result);
     persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
   }
+  selected = (Selected) {current_history_batch, history[current_history_batch].last_event};
 }
 
 static void history_load() {
@@ -292,15 +295,17 @@ static void history_window_load(Window *window) {
 
   int items = current_history_batch * HISTORY_BATCH_SIZE +
     history[current_history_batch].last_event + 1;
-  GSize max_size = GSize(bounds.size.w, items * 19); // font size is 18
-  history_layer = text_layer_create(GRect(0, 0, max_size.w, max_size.h));
+  int width = 142;
+  int margin = (bounds.size.w - width)/2;
+  GSize max_size = GSize(bounds.size.w, (items + 9) * 19); // font size is 18, 5 newlines before and 4 after
+  history_layer = text_layer_create(GRect(margin, 0, width, max_size.h));
   if ((current_history_batch == 0) && (history[0].last_event < 0)) {
     strcpy(history_text, "No history recorded.");
   }
   else {
     // int history_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
     // APP_LOG(APP_LOG_LEVEL_DEBUG, "%d history events", history_events);
-    strcpy(history_text, "");
+    strcpy(history_text, "\n\n\n\n\n");
     for (int b=current_history_batch; b>=0; b--) {
       // APP_LOG(APP_LOG_LEVEL_DEBUG, "Processing batch %d", b);
       for (int e=history[b].last_event; e>=0; e--) {
@@ -312,8 +317,10 @@ static void history_window_load(Window *window) {
       }
     }
   }
+  strncat(history_text, "\n\n\n\n", 5);
   text_layer_set_text(history_layer, history_text);
   text_layer_set_font(history_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
+  text_layer_set_overflow_mode(history_layer, GTextOverflowModeWordWrap);
   text_layer_set_text_color(history_layer, GColorBlack);
   text_layer_set_background_color(history_layer, GColorWhite);
   max_size = text_layer_get_content_size(history_layer);
@@ -321,6 +328,7 @@ static void history_window_load(Window *window) {
   text_layer_set_size(history_layer, max_size);
   scroll_layer_set_content_size(history_scroller, max_size);
   scroll_layer_add_child(history_scroller, text_layer_get_layer(history_layer));
+  scroll_layer_set_content_offset(history_scroller, GPoint(0, 40), true);
   layer_add_child(window_layer, scroll_layer_get_layer(history_scroller));
 }
 
@@ -340,17 +348,6 @@ static void history_show(ClickRecognizerRef recognizer, void *context) {
 
 static void move_graph() {
   int seconds = (int) (history[selected.b].event_time[selected.e] - start_time);
-/*
-  int start_time = (int) history[0].event_time[0];
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Start time is %d; selected %d/%d (%d)", start_time, selected.e, selected.b, history[selected.b].mood[selected.e]);
-  int selected_time = (int) history[selected.b].event_time[selected.e];
-  int seconds = selected_time - start_time;
-  if (seconds / seconds_per_pixel > MAX_GRAPH_PIXELS) {
-    APP_LOG(APP_LOG_LEVEL_DEBUG, "Max graph width %d exceeded, changing start_time from %d to %d", MAX_GRAPH_PIXELS, start_time, selected_time - (seconds_per_pixel/MAX_GRAPH_PIXELS));
-    seconds = (seconds_per_pixel/MAX_GRAPH_PIXELS);
-    start_time = selected_time - seconds;
-  }
-*/
   Layer *window_layer = window_get_root_layer(graph_window);
   GRect frame = layer_get_bounds(window_layer);
   graph_bounds.origin.x = frame.size.w/2 - seconds / seconds_per_pixel - CIRCLE_RADIUS * 2;
@@ -379,6 +376,7 @@ static void history_scroll_forward(ClickRecognizerRef recognizer, void *context)
     selected.e = 0;
   }
   else {
+    vibes_short_pulse();
     return;
   }
   move_graph();
@@ -393,6 +391,7 @@ static void history_scroll_back(ClickRecognizerRef recognizer, void *context) {
     selected.e = history[selected.b].last_event;
   }
   else {
+    vibes_short_pulse();
     return;
   }
   move_graph();
@@ -423,11 +422,12 @@ static void graph_window_load(Window *window) {
 }
 
 static void graph_window_unload(Window *window) {
+  gpath_destroy(line);
   layer_destroy(graph_layer);
 }
 
 static void graph_click_config_provider(void *context) {
-  window_long_click_subscribe(BUTTON_ID_SELECT, 400, history_show, NULL);
+  window_long_click_subscribe(BUTTON_ID_SELECT, 300, history_show, NULL);
   window_single_click_subscribe(BUTTON_ID_SELECT, history_zoom);
   window_single_click_subscribe(BUTTON_ID_UP, history_scroll_back);
   window_single_click_subscribe(BUTTON_ID_DOWN, history_scroll_forward);
@@ -449,6 +449,7 @@ static void graph_show(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  vibes_short_pulse();
   text_layer_set_text(greet_layer, "Mood set!\nPushing pin to timeline...");
   layer_mark_dirty(icon_layer);
   text_layer_set_text(mood_layer, Moods[current_mood]);
@@ -507,7 +508,7 @@ static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void click_config_provider(void *context) {
-  window_long_click_subscribe(BUTTON_ID_SELECT, 400, graph_show, NULL);
+  window_long_click_subscribe(BUTTON_ID_SELECT, 300, graph_show, NULL);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
@@ -567,6 +568,7 @@ static void window_load(Window *window) {
 static void window_unload(Window *window) {
   text_layer_destroy(mood_layer);
   text_layer_destroy(greet_layer);
+  layer_destroy(icon_layer);
 }
 
 static void init(void) {
@@ -585,7 +587,8 @@ static void init(void) {
 
   app_message_register_inbox_received(in_received_handler);
   app_message_register_inbox_dropped(in_dropped_handler);
-  app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
+  // app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
+  app_message_open(128, 128);
 
   // Does this make sense at all?
   if(launch_reason() == APP_LAUNCH_TIMELINE_ACTION) {
