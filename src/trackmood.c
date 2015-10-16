@@ -352,6 +352,7 @@ static void move_graph() {
   GRect frame = layer_get_bounds(window_layer);
   graph_bounds.origin.x = frame.size.w/2 - seconds / seconds_per_pixel - CIRCLE_RADIUS * 2;
   layer_set_bounds(graph_layer, graph_bounds);
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Moving graph to %d/%d", selected.e, selected.b);
 }
 
 static void history_zoom(ClickRecognizerRef recognizer, void *context) {
