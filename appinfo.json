@@ -4,7 +4,7 @@
   "longName": "Track Mood",
   "companyName": "Samuel Rinnetmaki",
   "versionCode": 1,
-  "versionLabel": "1.9",
+  "versionLabel": "1.10",
   "sdkVersion": "3",
   "targetPlatforms": ["basalt", "chalk"],
   "watchapp": {
