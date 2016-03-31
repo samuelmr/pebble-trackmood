@@ -34,6 +34,8 @@ static const bool animated = false;
 static int seconds_per_pixel = 1; // will be changed based on data
 static int start_time;
 static int end_time;
+static int events = 0;
+static int average_mood;
 
 enum Mood {
   TERRIBLE = 0,
@@ -55,6 +57,11 @@ enum KEYS {
   MOOD = 0,
   TIME = 1,
   HISTORY_BATCH_COUNT = 2,
+  EVENTS = 3,
+  AVG = 4,
+  AVG_TIME = 5,
+  PREV = 6,
+  PREV_TIME = 7,
   FIRST_HISTORY_BATCH = 10
 };
 
@@ -118,15 +125,15 @@ static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
 static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
   int orig_x = CIRCLE_RADIUS;
   int orig_y = graph_bounds.size.h - CIRCLE_RADIUS;
-  int num_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Total %d events in history", num_events);
+  events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Total %d events in history", events);
   GRect bounds = layer_get_bounds(graph_layer);
   GRect frame = layer_get_frame(graph_layer);
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Bounds: %d, %d, %d, %d", bounds.origin.x, bounds.origin.y, bounds.size.w, bounds.size.h);
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Frame: %d, %d, %d, %d", frame.origin.x, frame.origin.y, frame.size.w, frame.size.h);
   // min_visible_x = bounds.origin.x
 
-  GPoint points[num_events];
+  GPoint points[events];
   int b = 0;
   int e = 0;
   int num_points = 0;
@@ -134,7 +141,7 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
     APP_LOG(APP_LOG_LEVEL_WARNING, "Invalid data in history, start time of first event is 0!");
     return;
   }
-  for (int i=0; i<num_events; i++) {
+  for (int i=0; i<events; i++) {
     if (e == HISTORY_BATCH_SIZE) {
       b++;
       e = 0;
@@ -251,6 +258,7 @@ static void schedule_wakeup(int mood) {
 
 static void history_save() {
   persist_write_int(HISTORY_BATCH_COUNT, current_history_batch);
+  persist_write_int(AVG, average_mood);
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Writing %d history batches to persistent storage", current_history_batch+1);
   for (int i=0; i<=current_history_batch; i++) {
     // int result = persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
@@ -281,8 +289,12 @@ static void history_load() {
       APP_LOG(APP_LOG_LEVEL_WARNING, "No history batch %d although current_history_batch %d indicates its existence!", i, current_history_batch);
     }
   }
+  start_time = (int) history[0].event_time[0];
   selected = (Selected) {current_history_batch, history[current_history_batch].last_event};
-  int events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+  events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+  if (persist_exists(AVG)) {
+    average_mood = persist_read_int(AVG);
+  }
   APP_LOG(APP_LOG_LEVEL_DEBUG, "Total history: %d batches, %d events, %d bytes", current_history_batch+1, events, total_bytes_read);
 }
 
@@ -454,16 +466,6 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   text_layer_set_text(greet_layer, "Mood set!\nPushing pin to timeline...");
   layer_mark_dirty(icon_layer);
   text_layer_set_text(mood_layer, Moods[current_mood]);
-  DictionaryIterator *iter;
-  app_message_outbox_begin(&iter);
-  if (iter == NULL) {
-    APP_LOG(APP_LOG_LEVEL_WARNING, "Can not send mood to phone: dictionary init failed!");
-    return;
-  }
-  dict_write_int8(iter, MOOD, current_mood);
-  dict_write_int8(iter, TIME, current_time);
-  dict_write_end(iter);
-  app_message_outbox_send();
   if (current_history_batch < 0) {
     current_history_batch = 0;
     history[current_history_batch].last_event = 0;
@@ -471,10 +473,19 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   else if (history[current_history_batch].last_event >= HISTORY_BATCH_SIZE-1) {
     current_history_batch++;
     if (current_history_batch >= HISTORY_MAX_BATCHES) {
+      average_mood = 0;
+      events = 0;
+      int mood_sum = 0;
       for (int i=0; i<HISTORY_MAX_BATCHES-1; i++) {
         history[i] = history[i+1];
         persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
+        for (int j=0; j<history[i].last_event; j++) {
+          mood_sum += history[i].mood[j];
+          events++;
+        }
       }
+      // avg mood times ten so that it can be presented as a float with one decimal
+      average_mood = 10 * mood_sum / events;
       current_history_batch--;
     }
     history[current_history_batch].last_event = 0;
@@ -485,8 +496,36 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   history[current_history_batch].event_time[history[current_history_batch].last_event] = time(NULL);
   history[current_history_batch].mood[history[current_history_batch].last_event] = current_mood;
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "%d moods in current history batch, %d total", history[current_history_batch].last_event+1, current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event+1);
+  // avg mood times ten - also current mood!
+  average_mood = ((average_mood * events) + (10 * current_mood)) / (events + 1);
+  events++;
+  start_time = (int) history[0].event_time[0];
+  DictionaryIterator *iter;
+  app_message_outbox_begin(&iter);
+  if (iter == NULL) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "Can not send mood to phone: dictionary init failed!");
+    return;
+  }
+  dict_write_int8(iter, MOOD, current_mood);
+  dict_write_int8(iter, TIME, current_time);
+  if (current_history_batch >= 0) {
+    int current_event = history[current_history_batch].last_event;
+    int previous_event = current_event - 1;
+    int previous_batch = current_history_batch;
+    if ((previous_event < 0) && (current_history_batch > 0)) {
+      previous_event = HISTORY_BATCH_SIZE - 1;
+      previous_batch--;
+    }
+    dict_write_int8(iter, EVENTS, events);
+    dict_write_int8(iter, AVG, average_mood);
+    dict_write_int32(iter, AVG_TIME, start_time);
+    dict_write_int8(iter, PREV, history[previous_batch].mood[previous_event]);
+    dict_write_int32(iter, PREV_TIME, history[previous_batch].event_time[previous_event]);
+  }
+  dict_write_end(iter);
+  app_message_outbox_send();
   history_save();
-  schedule_wakeup(current_mood);
+  // schedule_wakeup(current_mood);
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -582,7 +621,8 @@ static void init(void) {
   text_font = fonts_get_system_font(FONT_KEY_GOTHIC_18);
 
   wakeup_service_subscribe(wakeup_handler);
-  schedule_wakeup(current_mood);
+  // skip wakeup (at least for now), use timeline reminder pins instead!
+  // schedule_wakeup(current_mood);
 
   history_load();
 
@@ -591,19 +631,6 @@ static void init(void) {
   // app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
   app_message_open(128, 128);
 
-  // Does this make sense at all?
-  if(launch_reason() == APP_LAUNCH_TIMELINE_ACTION) {
-    uint32_t timemood = launch_get_args();
-    // get time and mood from timemood!
-    int time = timemood % 10;
-    int mood = timemood - (10 * time);
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Launched from timeline, time: %d, mood: %d", time, mood);
-    current_mood = mood;
-    static char greet_text[40];
-    snprintf(greet_text, sizeof(greet_text), "In the %s you were feeling...", Times[time]);
-    text_layer_set_text(greet_layer, greet_text);
-  }
-
   window = window_create();
   window_set_click_config_provider(window, click_config_provider);
   window_set_window_handlers(window, (WindowHandlers) {
@@ -611,6 +638,13 @@ static void init(void) {
     .unload = window_unload,
   });
   window_stack_push(window, animated);
+
+  // Does this make sense at all?
+  if(launch_reason() == APP_LAUNCH_TIMELINE_ACTION) {
+    snprintf(greet_text, sizeof(greet_text), "Last time you were feeling %s", Moods[current_mood]);
+    text_layer_set_text(greet_layer, greet_text);
+  }
+
 }
 
 static void deinit(void) {
