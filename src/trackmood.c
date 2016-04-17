@@ -5,7 +5,7 @@
 #define PIXELS_PER_MOOD_LEVEL 25
 #define CIRCLE_RADIUS 15
 #define MAX_GRAPH_PIXELS 4000
-
+#define MAX_WAKEUPS 8
 static Window *window;
 static Window *history_window;
 static Window *graph_window;
@@ -36,6 +36,7 @@ static int start_time;
 static int end_time;
 static int events = 0;
 static int average_mood;
+static int javascript_ready = 0; // integer instead of boolean because of appmessage
 
 enum Mood {
   TERRIBLE = 0,
@@ -62,7 +63,15 @@ enum KEYS {
   AVG_TIME = 5,
   PREV = 6,
   PREV_TIME = 7,
-  FIRST_HISTORY_BATCH = 10
+  REMINDER_INTERVAL = 8,
+  REMINDER_START = 9,
+  REMINDER_END = 10,
+  REMINDER_METHOD = 11,
+  REMINDER_COUNT = 12,
+  MOOD_METHOD = 13, // not really used in C
+  MOOD_SERVER = 14, // not really used in C
+  JAVASCRIPT_READY = 20,
+  FIRST_HISTORY_BATCH = 35
 };
 
 const char *Moods[] = {"Terrible", "Bad", "OK", "Great", "Awesome"};
@@ -207,7 +216,7 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
   gpath_draw_outline_open(ctx, line);
 }
 
-static void greet_me() {
+static void greet_me(char *format) {
   time_t now = time(NULL);
   struct tm *tms = localtime(&now);
   if (tms->tm_hour < 5) {
@@ -216,44 +225,17 @@ static void greet_me() {
   else if (tms->tm_hour < 12) {
     current_time = MORNING;
   }
-  else if (tms->tm_hour < 15) {
+  else if (tms->tm_hour < 18) {
     current_time = DAY;
   }
-  else if (tms->tm_hour < 19) {
+  else if (tms->tm_hour < 22) {
     current_time = EVENING;
   }
   else {
     current_time = NIGHT;
   }
-  snprintf(greet_text, sizeof(greet_text), "Good %s!\nHow are you feeling?", Times[current_time]);
+  snprintf(greet_text, sizeof(greet_text), format, Times[current_time]);
   text_layer_set_text(greet_layer, greet_text);
-}
-
-static void schedule_wakeup(int mood) {
-  time_t next_time;
-  time_t now = time(NULL);
-  struct tm *tms = localtime(&now);
-  if (tms->tm_hour < 8) {
-    next_time = clock_to_timestamp(TODAY, 9, 0);
-  }
-  else if (tms->tm_hour < 12) {
-    next_time = clock_to_timestamp(TODAY, 13, 0);
-  }
-  else if (tms->tm_hour < 16) {
-    next_time = clock_to_timestamp(TODAY, 17, 0);
-  }
-  else if (tms->tm_hour < 20) {
-    next_time = clock_to_timestamp(TODAY, 21, 0);
-  }
-  else {
-    int tomorrow = tms->tm_wday + 2;
-    tomorrow = (tomorrow <= 7) ? tomorrow : 1;
-    next_time = clock_to_timestamp(tomorrow, 9, 0);
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 AM tomorrow: %d", (int) next_time);
-  }
-  wakeup_cancel_all();
-  wakeup_id = wakeup_schedule(next_time, (int32_t) mood, true);
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %d: %d.", (int) next_time, (int) wakeup_id);
 }
 
 static void history_save() {
@@ -446,7 +428,7 @@ static void graph_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_DOWN, history_scroll_forward);
 }
 
-static void graph_show(ClickRecognizerRef recognizer, void *context) {
+static void show_graph() {
   if (current_history_batch < 0) {
     APP_LOG(APP_LOG_LEVEL_DEBUG, "No history recorded...");
     return;
@@ -461,7 +443,22 @@ static void graph_show(ClickRecognizerRef recognizer, void *context) {
   window_set_click_config_provider(graph_window, graph_click_config_provider);
 }
 
-static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
+static void graph_show(ClickRecognizerRef recognizer, void *context) {
+  show_graph();
+}
+
+static void push_current_mood();
+
+static void push_timer_callback(void *data) {
+  push_current_mood();
+}
+
+static void push_current_mood() {
+  if (!javascript_ready) {
+    // beware of eternal loop!
+    app_timer_register(500, push_timer_callback, NULL);
+    return;
+  }
   vibes_short_pulse();
   text_layer_set_text(greet_layer, "Mood set!\nPushing pin to timeline...");
   layer_mark_dirty(icon_layer);
@@ -527,6 +524,9 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   history_save();
   // schedule_wakeup(current_mood);
 }
+static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  push_current_mood();
+}
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
   current_mood++;
@@ -554,20 +554,64 @@ static void click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
 }
 
-void in_received_handler(DictionaryIterator *received, void *context) {
+static void in_received_handler(DictionaryIterator *received, void *context) {
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Message from phone");
+  if (!javascript_ready) {
+    Tuple *jt = dict_find(received, JAVASCRIPT_READY);
+    if (jt) {
+      javascript_ready = jt->value->int8;
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "Javascript is ready: %d", javascript_ready);
+    }
+  }
   Tuple *mt = dict_find(received, MOOD);
-  strcpy(greet_text, mt->value->cstring);
-  text_layer_set_text(greet_layer, greet_text);
+  if (mt) {
+    strcpy(greet_text, mt->value->cstring);
+    APP_LOG(APP_LOG_LEVEL_DEBUG, greet_text);
+    text_layer_set_text(greet_layer, greet_text);
+    vibes_short_pulse();
+  }
+  char *reminder_method = "unknown";
+  Tuple *rt = dict_find(received, REMINDER_METHOD);
+  if (rt) {
+    strcpy(reminder_method, rt->value->cstring);
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "reminders: %s" ,reminder_method);
+    if (strcmp("wakeup", reminder_method) == 0) {
+      wakeup_cancel_all();
+      Tuple *ct = dict_find(received, REMINDER_COUNT);
+      int reminder_count = ct->value->int8;
+      if (reminder_count > MAX_WAKEUPS) {
+        reminder_count = MAX_WAKEUPS;
+      }
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "Setting %d wakeups", reminder_count);
+      for (int i=0; i<reminder_count; i++) {
+        Tuple *tt = dict_find(received, FIRST_HISTORY_BATCH + i);
+        time_t reminder_time = (time_t) tt->value->uint32;
+        wakeup_id = wakeup_schedule(reminder_time, (int32_t) current_mood, true);
+        // (APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %d: %d.", (int) reminder_time, (int) wakeup_id);
+      }
+    }
+  }
+  if(launch_reason() == APP_LAUNCH_TIMELINE_ACTION) {
+    // auto hide if mood evaluated from timeline pin
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Got message from phone: %s.", greet_text);
+    // psleep(5000);
+    // window_stack_pop_all(animated);
+  }
 }
 
-void in_dropped_handler(AppMessageResult reason, void *context) {
-  // APP_LOG(APP_LOG_LEVEL_WARNING, "Message from phone dropped: %d", reason);
+static void in_dropped_handler(AppMessageResult reason, void *context) {
+  APP_LOG(APP_LOG_LEVEL_WARNING, "Message from phone dropped: %d", reason);
   text_layer_set_text(greet_layer, "Couldn't push pin.\nPlease try again!");
 }
 
 static void wakeup_handler(WakeupId id, int32_t mood) {
-  current_mood = (int) mood;
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Woken up by wakeup %ld (last mood %ld)!", id, mood);
+  if ((mood >= 0) && (mood <= 4)) {
+    current_mood = (int) mood;
+  }
+  else {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "Wakeup code out of bounds: %d", (int) mood);
+  }
   vibes_enqueue_custom_pattern(CUSTOM_PATTERN);
 }
 
@@ -588,7 +632,6 @@ static void window_load(Window *window) {
   text_layer_set_font(greet_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
   text_layer_set_text_alignment(greet_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(greet_layer));
-  greet_me();
 
   GRect mood_layer_size = GRect(0, bounds.size.h-30, bounds.size.w, bounds.size.h);
   mood_layer = text_layer_create(mood_layer_size);
@@ -621,15 +664,13 @@ static void init(void) {
   text_font = fonts_get_system_font(FONT_KEY_GOTHIC_18);
 
   wakeup_service_subscribe(wakeup_handler);
-  // skip wakeup (at least for now), use timeline reminder pins instead!
-  // schedule_wakeup(current_mood);
 
   history_load();
 
   app_message_register_inbox_received(in_received_handler);
   app_message_register_inbox_dropped(in_dropped_handler);
   // app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
-  app_message_open(128, 128);
+  app_message_open(256, 256);
 
   window = window_create();
   window_set_click_config_provider(window, click_config_provider);
@@ -639,12 +680,29 @@ static void init(void) {
   });
   window_stack_push(window, animated);
 
-  // Does this make sense at all?
+  char *format = "Good %s!\nHow are you feeling?";
+  greet_me(format);
   if(launch_reason() == APP_LAUNCH_TIMELINE_ACTION) {
-    snprintf(greet_text, sizeof(greet_text), "Last time you were feeling %s", Moods[current_mood]);
-    text_layer_set_text(greet_layer, greet_text);
+    // APP_LOG(APP_LOG_LEVEL_WARNING, "TIMELINE");
+    int pin_mood = launch_get_args();
+    if ((pin_mood >= TERRIBLE) && (pin_mood <= AWESOME)) {
+      text_layer_set_text(greet_layer, "Mood set!\nPushing pin to timeline...");
+      current_mood = pin_mood;
+      layer_mark_dirty(icon_layer);
+      text_layer_set_text(mood_layer, Moods[current_mood]);
+      push_current_mood();
+      text_layer_set_text(greet_layer, "Mood set!\nPushing pin to timeline...");
+    }
+    else if (pin_mood == FIRST_HISTORY_BATCH) {
+      show_graph();
+    }
+    else {
+      APP_LOG(APP_LOG_LEVEL_WARNING, "Pin launchCode out of bounds: %d", (int) pin_mood);
+    }
   }
-
+  else {
+    // APP_LOG(APP_LOG_LEVEL_WARNING, "Reason: %d", (int) launch_reason());
+  }
 }
 
 static void deinit(void) {

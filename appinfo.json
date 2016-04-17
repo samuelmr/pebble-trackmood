@@ -3,13 +3,17 @@
   "shortName": "Track Mood",
   "longName": "Track Mood",
   "companyName": "Samuel Rinnetmaki",
-  "versionCode": 2,
-  "versionLabel": "2.4",
+  "versionCode": 3,
+  "versionLabel": "3.0",
   "sdkVersion": "3",
   "targetPlatforms": ["aplite", "basalt", "chalk"],
+  "enableMultiJS": true,
   "watchapp": {
     "watchface": false
   },
+  "capabilities": [
+    "configurable"
+  ],
   "appKeys": {
     "mood": 0,
     "time": 1,
@@ -18,7 +22,15 @@
     "avgMood": 4,
     "avgTime": 5,
     "prevMood": 6,
-    "prevTime": 7
+    "prevTime": 7,
+    "reminderInterval": 8,
+    "reminderStart": 9,
+    "reminderEnd": 10,
+    "reminderMethod": 11,
+    "reminderCount": 12,
+    "moodMethod": 13,
+    "moodServer": 14,
+    "javascriptReady": 20
   },
   "resources": {
     "media": [
