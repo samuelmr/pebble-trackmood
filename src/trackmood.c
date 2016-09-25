@@ -5,7 +5,7 @@
 #define PIXELS_PER_MOOD_LEVEL 25
 #define CIRCLE_RADIUS 15
 #define MAX_GRAPH_PIXELS 4000
-
+#define MAX_WAKEUPS 8
 static Window *window;
 static Window *history_window;
 static Window *graph_window;
@@ -34,6 +34,9 @@ static const bool animated = false;
 static int seconds_per_pixel = 1; // will be changed based on data
 static int start_time;
 static int end_time;
+static int events = 0;
+static int average_mood;
+static int javascript_ready = 0; // integer instead of boolean because of appmessage
 
 enum Mood {
   TERRIBLE = 0,
@@ -55,7 +58,20 @@ enum KEYS {
   MOOD = 0,
   TIME = 1,
   HISTORY_BATCH_COUNT = 2,
-  FIRST_HISTORY_BATCH = 10
+  EVENTS = 3,
+  AVG = 4,
+  AVG_TIME = 5,
+  PREV = 6,
+  PREV_TIME = 7,
+  REMINDER_INTERVAL = 8,
+  REMINDER_START = 9,
+  REMINDER_END = 10,
+  REMINDER_METHOD = 11,
+  REMINDER_COUNT = 12,
+  MOOD_METHOD = 13, // not really used in C
+  MOOD_SERVER = 14, // not really used in C
+  JAVASCRIPT_READY = 20,
+  FIRST_HISTORY_BATCH = 35
 };
 
 const char *Moods[] = {"Terrible", "Bad", "OK", "Great", "Awesome"};
@@ -118,15 +134,15 @@ static void icon_layer_update_proc(Layer *layer, GContext *ctx) {
 static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
   int orig_x = CIRCLE_RADIUS;
   int orig_y = graph_bounds.size.h - CIRCLE_RADIUS;
-  int num_events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Total %d events in history", num_events);
+  events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Total %d events in history", events);
   GRect bounds = layer_get_bounds(graph_layer);
   GRect frame = layer_get_frame(graph_layer);
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Bounds: %d, %d, %d, %d", bounds.origin.x, bounds.origin.y, bounds.size.w, bounds.size.h);
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Frame: %d, %d, %d, %d", frame.origin.x, frame.origin.y, frame.size.w, frame.size.h);
   // min_visible_x = bounds.origin.x
 
-  GPoint points[num_events];
+  GPoint points[events];
   int b = 0;
   int e = 0;
   int num_points = 0;
@@ -134,7 +150,7 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
     APP_LOG(APP_LOG_LEVEL_WARNING, "Invalid data in history, start time of first event is 0!");
     return;
   }
-  for (int i=0; i<num_events; i++) {
+  for (int i=0; i<events; i++) {
     if (e == HISTORY_BATCH_SIZE) {
       b++;
       e = 0;
@@ -200,7 +216,7 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
   gpath_draw_outline_open(ctx, line);
 }
 
-static void greet_me() {
+static void greet_me(char *format) {
   time_t now = time(NULL);
   struct tm *tms = localtime(&now);
   if (tms->tm_hour < 5) {
@@ -209,48 +225,22 @@ static void greet_me() {
   else if (tms->tm_hour < 12) {
     current_time = MORNING;
   }
-  else if (tms->tm_hour < 15) {
+  else if (tms->tm_hour < 18) {
     current_time = DAY;
   }
-  else if (tms->tm_hour < 19) {
+  else if (tms->tm_hour < 22) {
     current_time = EVENING;
   }
   else {
     current_time = NIGHT;
   }
-  snprintf(greet_text, sizeof(greet_text), "Good %s!\nHow are you feeling?", Times[current_time]);
+  snprintf(greet_text, sizeof(greet_text), format, Times[current_time]);
   text_layer_set_text(greet_layer, greet_text);
-}
-
-static void schedule_wakeup(int mood) {
-  time_t next_time;
-  time_t now = time(NULL);
-  struct tm *tms = localtime(&now);
-  if (tms->tm_hour < 8) {
-    next_time = clock_to_timestamp(TODAY, 9, 0);
-  }
-  else if (tms->tm_hour < 12) {
-    next_time = clock_to_timestamp(TODAY, 13, 0);
-  }
-  else if (tms->tm_hour < 16) {
-    next_time = clock_to_timestamp(TODAY, 17, 0);
-  }
-  else if (tms->tm_hour < 20) {
-    next_time = clock_to_timestamp(TODAY, 21, 0);
-  }
-  else {
-    int tomorrow = tms->tm_wday + 2;
-    tomorrow = (tomorrow <= 7) ? tomorrow : 1;
-    next_time = clock_to_timestamp(tomorrow, 9, 0);
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Next wakeup 9 AM tomorrow: %d", (int) next_time);
-  }
-  wakeup_cancel_all();
-  wakeup_id = wakeup_schedule(next_time, (int32_t) mood, true);
-  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %d: %d.", (int) next_time, (int) wakeup_id);
 }
 
 static void history_save() {
   persist_write_int(HISTORY_BATCH_COUNT, current_history_batch);
+  persist_write_int(AVG, average_mood);
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Writing %d history batches to persistent storage", current_history_batch+1);
   for (int i=0; i<=current_history_batch; i++) {
     // int result = persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
@@ -281,8 +271,12 @@ static void history_load() {
       APP_LOG(APP_LOG_LEVEL_WARNING, "No history batch %d although current_history_batch %d indicates its existence!", i, current_history_batch);
     }
   }
+  start_time = (int) history[0].event_time[0];
   selected = (Selected) {current_history_batch, history[current_history_batch].last_event};
-  int events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+  events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
+  if (persist_exists(AVG)) {
+    average_mood = persist_read_int(AVG);
+  }
   APP_LOG(APP_LOG_LEVEL_DEBUG, "Total history: %d batches, %d events, %d bytes", current_history_batch+1, events, total_bytes_read);
 }
 
@@ -434,7 +428,7 @@ static void graph_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_DOWN, history_scroll_forward);
 }
 
-static void graph_show(ClickRecognizerRef recognizer, void *context) {
+static void show_graph() {
   if (current_history_batch < 0) {
     APP_LOG(APP_LOG_LEVEL_DEBUG, "No history recorded...");
     return;
@@ -449,21 +443,26 @@ static void graph_show(ClickRecognizerRef recognizer, void *context) {
   window_set_click_config_provider(graph_window, graph_click_config_provider);
 }
 
-static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
+static void graph_show(ClickRecognizerRef recognizer, void *context) {
+  show_graph();
+}
+
+static void push_current_mood();
+
+static void push_timer_callback(void *data) {
+  push_current_mood();
+}
+
+static void push_current_mood() {
+  if (!javascript_ready) {
+    // beware of eternal loop!
+    app_timer_register(500, push_timer_callback, NULL);
+    return;
+  }
   vibes_short_pulse();
   text_layer_set_text(greet_layer, "Mood set!\nPushing pin to timeline...");
   layer_mark_dirty(icon_layer);
   text_layer_set_text(mood_layer, Moods[current_mood]);
-  DictionaryIterator *iter;
-  app_message_outbox_begin(&iter);
-  if (iter == NULL) {
-    APP_LOG(APP_LOG_LEVEL_WARNING, "Can not send mood to phone: dictionary init failed!");
-    return;
-  }
-  dict_write_int8(iter, MOOD, current_mood);
-  dict_write_int8(iter, TIME, current_time);
-  dict_write_end(iter);
-  app_message_outbox_send();
   if (current_history_batch < 0) {
     current_history_batch = 0;
     history[current_history_batch].last_event = 0;
@@ -471,10 +470,19 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   else if (history[current_history_batch].last_event >= HISTORY_BATCH_SIZE-1) {
     current_history_batch++;
     if (current_history_batch >= HISTORY_MAX_BATCHES) {
+      average_mood = 0;
+      events = 0;
+      int mood_sum = 0;
       for (int i=0; i<HISTORY_MAX_BATCHES-1; i++) {
         history[i] = history[i+1];
         persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
+        for (int j=0; j<history[i].last_event; j++) {
+          mood_sum += history[i].mood[j];
+          events++;
+        }
       }
+      // avg mood times ten so that it can be presented as a float with one decimal
+      average_mood = 10 * mood_sum / events;
       current_history_batch--;
     }
     history[current_history_batch].last_event = 0;
@@ -485,8 +493,39 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   history[current_history_batch].event_time[history[current_history_batch].last_event] = time(NULL);
   history[current_history_batch].mood[history[current_history_batch].last_event] = current_mood;
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "%d moods in current history batch, %d total", history[current_history_batch].last_event+1, current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event+1);
+  // avg mood times ten - also current mood!
+  average_mood = ((average_mood * events) + (10 * current_mood)) / (events + 1);
+  events++;
+  start_time = (int) history[0].event_time[0];
+  DictionaryIterator *iter;
+  app_message_outbox_begin(&iter);
+  if (iter == NULL) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "Can not send mood to phone: dictionary init failed!");
+    return;
+  }
+  dict_write_int8(iter, MOOD, current_mood);
+  dict_write_int8(iter, TIME, current_time);
+  if (current_history_batch >= 0) {
+    int current_event = history[current_history_batch].last_event;
+    int previous_event = current_event - 1;
+    int previous_batch = current_history_batch;
+    if ((previous_event < 0) && (current_history_batch > 0)) {
+      previous_event = HISTORY_BATCH_SIZE - 1;
+      previous_batch--;
+    }
+    dict_write_int8(iter, EVENTS, events);
+    dict_write_int8(iter, AVG, average_mood);
+    dict_write_int32(iter, AVG_TIME, start_time);
+    dict_write_int8(iter, PREV, history[previous_batch].mood[previous_event]);
+    dict_write_int32(iter, PREV_TIME, history[previous_batch].event_time[previous_event]);
+  }
+  dict_write_end(iter);
+  app_message_outbox_send();
   history_save();
-  schedule_wakeup(current_mood);
+  // schedule_wakeup(current_mood);
+}
+static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  push_current_mood();
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -515,20 +554,64 @@ static void click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
 }
 
-void in_received_handler(DictionaryIterator *received, void *context) {
+static void in_received_handler(DictionaryIterator *received, void *context) {
+  // APP_LOG(APP_LOG_LEVEL_DEBUG, "Message from phone");
+  if (!javascript_ready) {
+    Tuple *jt = dict_find(received, JAVASCRIPT_READY);
+    if (jt) {
+      javascript_ready = jt->value->int8;
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "Javascript is ready: %d", javascript_ready);
+    }
+  }
   Tuple *mt = dict_find(received, MOOD);
-  strcpy(greet_text, mt->value->cstring);
-  text_layer_set_text(greet_layer, greet_text);
+  if (mt) {
+    strcpy(greet_text, mt->value->cstring);
+    APP_LOG(APP_LOG_LEVEL_DEBUG, greet_text);
+    text_layer_set_text(greet_layer, greet_text);
+    vibes_short_pulse();
+  }
+  char *reminder_method = "unknown";
+  Tuple *rt = dict_find(received, REMINDER_METHOD);
+  if (rt) {
+    strcpy(reminder_method, rt->value->cstring);
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "reminders: %s" ,reminder_method);
+    if (strcmp("wakeup", reminder_method) == 0) {
+      wakeup_cancel_all();
+      Tuple *ct = dict_find(received, REMINDER_COUNT);
+      int reminder_count = ct->value->int8;
+      if (reminder_count > MAX_WAKEUPS) {
+        reminder_count = MAX_WAKEUPS;
+      }
+      // APP_LOG(APP_LOG_LEVEL_DEBUG, "Setting %d wakeups", reminder_count);
+      for (int i=0; i<reminder_count; i++) {
+        Tuple *tt = dict_find(received, FIRST_HISTORY_BATCH + i);
+        time_t reminder_time = (time_t) tt->value->uint32;
+        wakeup_id = wakeup_schedule(reminder_time, (int32_t) current_mood, true);
+        // (APP_LOG_LEVEL_DEBUG, "Set wakeup timer for %d: %d.", (int) reminder_time, (int) wakeup_id);
+      }
+    }
+  }
+  if(launch_reason() == APP_LAUNCH_TIMELINE_ACTION) {
+    // auto hide if mood evaluated from timeline pin
+    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Got message from phone: %s.", greet_text);
+    // psleep(5000);
+    // window_stack_pop_all(animated);
+  }
 }
 
-void in_dropped_handler(AppMessageResult reason, void *context) {
-  // APP_LOG(APP_LOG_LEVEL_WARNING, "Message from phone dropped: %d", reason);
+static void in_dropped_handler(AppMessageResult reason, void *context) {
+  APP_LOG(APP_LOG_LEVEL_WARNING, "Message from phone dropped: %d", reason);
   text_layer_set_text(greet_layer, "Couldn't push pin.\nPlease try again!");
 }
 
 static void wakeup_handler(WakeupId id, int32_t mood) {
-  current_mood = (int) mood;
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Woken up by wakeup %ld (last mood %ld)!", id, mood);
+  if ((mood >= 0) && (mood <= 4)) {
+    current_mood = (int) mood;
+  }
+  else {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "Wakeup code out of bounds: %d", (int) mood);
+  }
   vibes_enqueue_custom_pattern(CUSTOM_PATTERN);
 }
 
@@ -549,7 +632,6 @@ static void window_load(Window *window) {
   text_layer_set_font(greet_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
   text_layer_set_text_alignment(greet_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(greet_layer));
-  greet_me();
 
   GRect mood_layer_size = GRect(0, bounds.size.h-30, bounds.size.w, bounds.size.h);
   mood_layer = text_layer_create(mood_layer_size);
@@ -582,27 +664,13 @@ static void init(void) {
   text_font = fonts_get_system_font(FONT_KEY_GOTHIC_18);
 
   wakeup_service_subscribe(wakeup_handler);
-  schedule_wakeup(current_mood);
 
   history_load();
 
   app_message_register_inbox_received(in_received_handler);
   app_message_register_inbox_dropped(in_dropped_handler);
   // app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
-  app_message_open(128, 128);
-
-  // Does this make sense at all?
-  if(launch_reason() == APP_LAUNCH_TIMELINE_ACTION) {
-    uint32_t timemood = launch_get_args();
-    // get time and mood from timemood!
-    int time = timemood % 10;
-    int mood = timemood - (10 * time);
-    // APP_LOG(APP_LOG_LEVEL_DEBUG, "Launched from timeline, time: %d, mood: %d", time, mood);
-    current_mood = mood;
-    static char greet_text[40];
-    snprintf(greet_text, sizeof(greet_text), "In the %s you were feeling...", Times[time]);
-    text_layer_set_text(greet_layer, greet_text);
-  }
+  app_message_open(256, 256);
 
   window = window_create();
   window_set_click_config_provider(window, click_config_provider);
@@ -611,6 +679,30 @@ static void init(void) {
     .unload = window_unload,
   });
   window_stack_push(window, animated);
+
+  char *format = "Good %s!\nHow are you feeling?";
+  greet_me(format);
+  if(launch_reason() == APP_LAUNCH_TIMELINE_ACTION) {
+    // APP_LOG(APP_LOG_LEVEL_WARNING, "TIMELINE");
+    int pin_mood = launch_get_args();
+    if ((pin_mood >= TERRIBLE) && (pin_mood <= AWESOME)) {
+      text_layer_set_text(greet_layer, "Mood set!\nPushing pin to timeline...");
+      current_mood = pin_mood;
+      layer_mark_dirty(icon_layer);
+      text_layer_set_text(mood_layer, Moods[current_mood]);
+      push_current_mood();
+      text_layer_set_text(greet_layer, "Mood set!\nPushing pin to timeline...");
+    }
+    else if (pin_mood == FIRST_HISTORY_BATCH) {
+      show_graph();
+    }
+    else {
+      APP_LOG(APP_LOG_LEVEL_WARNING, "Pin launchCode out of bounds: %d", (int) pin_mood);
+    }
+  }
+  else {
+    // APP_LOG(APP_LOG_LEVEL_WARNING, "Reason: %d", (int) launch_reason());
+  }
 }
 
 static void deinit(void) {
