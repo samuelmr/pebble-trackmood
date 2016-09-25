@@ -2,9 +2,9 @@
   "uuid": "0c04a340-bc84-4337-834c-2ca803bb28d4",
   "shortName": "Track Mood",
   "longName": "Track Mood",
-  "companyName": "Samuel Rinnetmaki",
+  "companyName": "Samuel Rinnetmäki",
   "versionCode": 1,
-  "versionLabel": "1.10",
+  "versionLabel": "1.2",
   "sdkVersion": "3",
   "targetPlatforms": ["basalt", "chalk"],
   "watchapp": {
