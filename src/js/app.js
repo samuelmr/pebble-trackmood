@@ -1,5 +1,5 @@
-var Clay = require('clay');
-var clayConfig = require('config.json');
+var Clay = require('pebble-clay');
+var clayConfig = require('./config');
 var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
 
 var MAX_ERRORS = 5;
@@ -10,6 +10,7 @@ var MAX_WAKEUPS = 8;
 // var MAX_REMINDER_PINS = 10;
 
 var Moods = ["Terrible", "Bad", "OK", "Great", "Awesome"];
+var Icons = ["TERRIBLE", "BAD", "OK", "GREAT", "AWESOME"];
 var Times = ["morning", "afternoon", "daytime", "evening", "night"];
 var Months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var timelineDays = 8;
@@ -100,6 +101,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
     return;
   }
   conf = clay.getSettings(e.response);
+  // console.log('New configuration: ' + JSON.stringify(conf));
   localStorage.setItem('conf', JSON.stringify(conf));
   setReminders(conf);
 });
@@ -252,7 +254,7 @@ function pushMoodPin(values) {
       "title": Moods[values.mood] + " mood",
       "subtitle": "in the " + Times[values.time],
       "body": bodyText,
-      "tinyIcon": "system://images/TIMELINE_CALENDAR" // different mood icons?
+      "tinyIcon": "app://images/" + Icons[values.mood]
     },
     "actions": [
       {

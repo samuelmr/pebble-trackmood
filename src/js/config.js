@@ -1,4 +1,4 @@
-[
+module.exports = [
   {
     "type": "heading",
     "defaultValue": "Configuration",
@@ -15,7 +15,7 @@
       {
         "label": "Remind to evaluate mood every ",
         "type": "slider",
-        "appKey": "reminderInterval",
+        "messageKey": "reminderInterval",
         "defaultValue": 4,
         "min": 1,
         "max": 12,
@@ -24,7 +24,7 @@
       {
         "label": " hours between ",
         "type": "slider",
-        "appKey": "reminderStart",
+        "messageKey": "reminderStart",
         "defaultValue": 9,
         "min": 0,
         "max": 23,
@@ -33,7 +33,7 @@
       {
         "label": " and ",
         "type": "slider",
-        "appKey": "reminderEnd",
+        "messageKey": "reminderEnd",
         "defaultValue": 21,
         "min": 1,
         "max": 24,
@@ -42,7 +42,7 @@
       {
         "label": " by ",
         "type": "radiogroup",
-        "appKey": "reminderMethod",
+        "messageKey": "reminderMethod",
         "defaultValue": "pin",
         "options": [
           {
@@ -57,6 +57,7 @@
       }
     ]
   },
+/*
   {
     "type": "section",
     "items": [
@@ -82,7 +83,7 @@
       {
         "label": "Method",
         "type": "radiogroup",
-        "appKey": "moodMethod",
+        "messageKey": "moodMethod",
         "defaultValue": "PUT",
         "options": [
           {
@@ -102,7 +103,7 @@
       {
         "label": "URL",
         "type": "input",
-        "appKey": "moodServer",
+        "messageKey": "moodServer",
         "defaultValue": "http://",
         "attributes":
         {
@@ -111,9 +112,10 @@
       }
     ]
   },
+*/
   {
     "type": "submit",
     "primary": true,
     "defaultValue": "Set and save"
   }
-]
+];

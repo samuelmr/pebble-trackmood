@@ -1,0 +1,207 @@
+{
+  "version": "3.0.0",
+  "author": "Samuel Rinnetmäki",
+  "private": true,
+  "dependencies": {
+    "pebble-clay": "^1.0.1"
+  },
+  "keywords": [
+    "pebble-app"
+  ],
+  "pebble": {
+    "sdkVersion": "3",
+    "resources": {
+      "media": [
+        {
+          "type": "raw",
+          "name": "ICON_TERRIBLE",
+          "file": "terrible.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_BAD",
+          "file": "bad.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_OK",
+          "file": "ok.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_GREAT",
+          "file": "great.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_AWESOME",
+          "file": "awesome.pdc"
+        },
+        {
+          "file": "images/terrible80.png",
+          "name": "TERRIBLE_LARGE",
+          "type": "png"
+        },
+        {
+          "file": "images/terrible50.png",
+          "name": "TERRIBLE_SMALL",
+          "type": "png"
+        },
+        {
+          "file": "images/terrible25.png",
+          "name": "TERRIBLE_TINY",
+          "type": "png"
+        },
+        {
+          "file": "images/bad80.png",
+          "name": "BAD_LARGE",
+          "type": "png"
+        },
+        {
+          "file": "images/bad50.png",
+          "name": "BAD_SMALL",
+          "type": "png"
+        },
+        {
+          "file": "images/bad25.png",
+          "name": "BAD_TINY",
+          "type": "png"
+        },
+        {
+          "file": "images/ok80.png",
+          "name": "OK_LARGE",
+          "type": "png"
+        },
+        {
+          "file": "images/ok50.png",
+          "name": "OK_SMALL",
+          "type": "png"
+        },
+        {
+          "file": "images/ok25.png",
+          "name": "OK_TINY",
+          "type": "png"
+        },
+        {
+          "file": "images/great80.png",
+          "name": "GREAT_LARGE",
+          "type": "png"
+        },
+        {
+          "file": "images/great50.png",
+          "name": "GREAT_SMALL",
+          "type": "png"
+        },
+        {
+          "file": "images/great25.png",
+          "name": "GREAT_TINY",
+          "type": "png"
+        },
+        {
+          "file": "images/awesome80.png",
+          "name": "AWESOME_LARGE",
+          "type": "png"
+        },
+        {
+          "file": "images/awesome50.png",
+          "name": "AWESOME_SMALL",
+          "type": "png"
+        },
+        {
+          "file": "images/awesome25.png",
+          "name": "AWESOME_TINY",
+          "type": "png"
+        }
+      ],
+      "publishedMedia": [
+        {
+          "name": "TERRIBLE",
+          "id": 1,
+          "glance": "TERRIBLE_TINY",
+          "timeline": {
+            "tiny": "TERRIBLE_TINY",
+            "small": "TERRIBLE_SMALL",
+            "large": "TERRIBLE_LARGE"
+          }
+        },
+        {
+          "name": "BAD",
+          "id": 2,
+          "glance": "BAD_TINY",
+          "timeline": {
+            "tiny": "BAD_TINY",
+            "small": "BAD_SMALL",
+            "large": "BAD_LARGE"
+          }
+        },
+        {
+          "name": "OK",
+          "id": 3,
+          "glance": "OK_TINY",
+          "timeline": {
+            "tiny": "OK_TINY",
+            "small": "OK_SMALL",
+            "large": "OK_LARGE"
+          }
+        },
+        {
+          "name": "GREAT",
+          "id": 4,
+          "glance": "GREAT_TINY",
+          "timeline": {
+            "tiny": "GREAT_TINY",
+            "small": "GREAT_SMALL",
+            "large": "GREAT_LARGE"
+          }
+        },
+        {
+          "name": "AWESOME",
+          "id": 5,
+          "glance": "AWESOME_TINY",
+          "timeline": {
+            "tiny": "AWESOME_TINY",
+            "small": "AWESOME_SMALL",
+            "large": "AWESOME_LARGE"
+          }
+        }
+      ]
+    },
+    "projectType": "native",
+    "uuid": "0c04a340-bc84-4337-834c-2ca803bb28d4",
+    "messageKeys": [
+      "mood",
+      "time",
+      "batches",
+      "events",
+      "avgMood",
+      "avgTime",
+      "prevMood",
+      "prevTime",
+      "reminderInterval",
+      "reminderStart",
+      "reminderEnd",
+      "reminderMethod",
+      "reminderCount",
+      "moodMethod",
+      "moodServer",
+      "javascriptReady"
+    ],
+    "enableMultiJS": true,
+    "displayName": "Track Mood",
+    "watchapp": {
+      "onlyShownOnCommunication": false,
+      "hiddenApp": false,
+      "watchface": false
+    },
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite"
+    ],
+    "capabilities": [
+      "configurable"
+    ]
+  },
+  "name": "track-mood"
+}
