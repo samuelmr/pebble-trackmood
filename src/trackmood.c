@@ -1,6 +1,7 @@
 #include <pebble.h>
 #define HISTORY_BATCH_SIZE 25
 #define HISTORY_MAX_BATCHES 8
+#define FIRST_HISTORY_BATCH 35
 #define EVENT_TEXT_SIZE 30
 #define PIXELS_PER_MOOD_LEVEL 25
 #define CIRCLE_RADIUS 15
@@ -54,32 +55,19 @@ enum Daytime {
   NIGHT = 4
 };
 
-enum KEYS {
-  MOOD = 0,
-  TIME = 1,
-  HISTORY_BATCH_COUNT = 2,
-  EVENTS = 3,
-  AVG = 4,
-  AVG_TIME = 5,
-  PREV = 6,
-  PREV_TIME = 7,
-  REMINDER_INTERVAL = 8,
-  REMINDER_START = 9,
-  REMINDER_END = 10,
-  REMINDER_METHOD = 11,
-  REMINDER_COUNT = 12,
-  MOOD_METHOD = 13, // not really used in C
-  MOOD_SERVER = 14, // not really used in C
-  JAVASCRIPT_READY = 20,
-  FIRST_HISTORY_BATCH = 35
-};
-
 const char *Moods[] = {"Terrible", "Bad", "OK", "Great", "Awesome"};
 const char *Times[] = {"morning", "afternoon", "day", "evening", "night"};
+static int SliceIcons[] = {
+  PUBLISHED_ID_TERRIBLE,
+  PUBLISHED_ID_BAD,
+  PUBLISHED_ID_OK,
+  PUBLISHED_ID_GREAT,
+  PUBLISHED_ID_AWESOME
+};
 GColor Mood_colors[5];
 
-int current_mood = GREAT;
-int current_time = DAY;
+static int current_mood = GREAT;
+static int current_time = DAY;
 
 static int max_zoom_level = 4;
 static int min_zoom_level = 0;
@@ -239,8 +227,8 @@ static void greet_me(char *format) {
 }
 
 static void history_save() {
-  persist_write_int(HISTORY_BATCH_COUNT, current_history_batch);
-  persist_write_int(AVG, average_mood);
+  persist_write_int(MESSAGE_KEY_batches, current_history_batch);
+  persist_write_int(MESSAGE_KEY_avgMood, average_mood);
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Writing %d history batches to persistent storage", current_history_batch+1);
   for (int i=0; i<=current_history_batch; i++) {
     // int result = persist_write_data(FIRST_HISTORY_BATCH+i, &history[i], sizeof(history[i]));
@@ -251,8 +239,8 @@ static void history_save() {
 }
 
 static void history_load() {
-  if (persist_exists(HISTORY_BATCH_COUNT)) {
-    current_history_batch = persist_read_int(HISTORY_BATCH_COUNT);
+  if (persist_exists(MESSAGE_KEY_batches)) {
+    current_history_batch = persist_read_int(MESSAGE_KEY_batches);
   }
   if (current_history_batch < 0) {
     // APP_LOG(APP_LOG_LEVEL_DEBUG, "No history in persistent storage: %d", current_history_batch);
@@ -274,8 +262,8 @@ static void history_load() {
   start_time = (int) history[0].event_time[0];
   selected = (Selected) {current_history_batch, history[current_history_batch].last_event};
   events = current_history_batch * HISTORY_BATCH_SIZE + history[current_history_batch].last_event + 1;
-  if (persist_exists(AVG)) {
-    average_mood = persist_read_int(AVG);
+  if (persist_exists(MESSAGE_KEY_avgMood)) {
+    average_mood = persist_read_int(MESSAGE_KEY_avgMood);
   }
   APP_LOG(APP_LOG_LEVEL_DEBUG, "Total history: %d batches, %d events, %d bytes", current_history_batch+1, events, total_bytes_read);
 }
@@ -503,8 +491,8 @@ static void push_current_mood() {
     APP_LOG(APP_LOG_LEVEL_WARNING, "Can not send mood to phone: dictionary init failed!");
     return;
   }
-  dict_write_int8(iter, MOOD, current_mood);
-  dict_write_int8(iter, TIME, current_time);
+  dict_write_int8(iter, MESSAGE_KEY_mood, current_mood);
+  dict_write_int8(iter, MESSAGE_KEY_time, current_time);
   if (current_history_batch >= 0) {
     int current_event = history[current_history_batch].last_event;
     int previous_event = current_event - 1;
@@ -513,11 +501,11 @@ static void push_current_mood() {
       previous_event = HISTORY_BATCH_SIZE - 1;
       previous_batch--;
     }
-    dict_write_int8(iter, EVENTS, events);
-    dict_write_int8(iter, AVG, average_mood);
-    dict_write_int32(iter, AVG_TIME, start_time);
-    dict_write_int8(iter, PREV, history[previous_batch].mood[previous_event]);
-    dict_write_int32(iter, PREV_TIME, history[previous_batch].event_time[previous_event]);
+    dict_write_int8(iter, MESSAGE_KEY_events, events);
+    dict_write_int8(iter, MESSAGE_KEY_avgMood, average_mood);
+    dict_write_int32(iter, MESSAGE_KEY_avgTime, start_time);
+    dict_write_int8(iter, MESSAGE_KEY_prevMood, history[previous_batch].mood[previous_event]);
+    dict_write_int32(iter, MESSAGE_KEY_prevTime, history[previous_batch].event_time[previous_event]);
   }
   dict_write_end(iter);
   app_message_outbox_send();
@@ -557,13 +545,13 @@ static void click_config_provider(void *context) {
 static void in_received_handler(DictionaryIterator *received, void *context) {
   // APP_LOG(APP_LOG_LEVEL_DEBUG, "Message from phone");
   if (!javascript_ready) {
-    Tuple *jt = dict_find(received, JAVASCRIPT_READY);
+    Tuple *jt = dict_find(received, MESSAGE_KEY_javascriptReady);
     if (jt) {
       javascript_ready = jt->value->int8;
       // APP_LOG(APP_LOG_LEVEL_DEBUG, "Javascript is ready: %d", javascript_ready);
     }
   }
-  Tuple *mt = dict_find(received, MOOD);
+  Tuple *mt = dict_find(received, MESSAGE_KEY_mood);
   if (mt) {
     strcpy(greet_text, mt->value->cstring);
     APP_LOG(APP_LOG_LEVEL_DEBUG, greet_text);
@@ -571,13 +559,13 @@ static void in_received_handler(DictionaryIterator *received, void *context) {
     vibes_short_pulse();
   }
   char *reminder_method = "unknown";
-  Tuple *rt = dict_find(received, REMINDER_METHOD);
+  Tuple *rt = dict_find(received, MESSAGE_KEY_reminderMethod);
   if (rt) {
     strcpy(reminder_method, rt->value->cstring);
     // APP_LOG(APP_LOG_LEVEL_DEBUG, "reminders: %s" ,reminder_method);
     if (strcmp("wakeup", reminder_method) == 0) {
       wakeup_cancel_all();
-      Tuple *ct = dict_find(received, REMINDER_COUNT);
+      Tuple *ct = dict_find(received, MESSAGE_KEY_reminderCount);
       int reminder_count = ct->value->int8;
       if (reminder_count > MAX_WAKEUPS) {
         reminder_count = MAX_WAKEUPS;
@@ -596,6 +584,25 @@ static void in_received_handler(DictionaryIterator *received, void *context) {
     // APP_LOG(APP_LOG_LEVEL_DEBUG, "Got message from phone: %s.", greet_text);
     // psleep(5000);
     // window_stack_pop_all(animated);
+  }
+}
+
+static void prv_update_app_glance(AppGlanceReloadSession *session,
+                                       size_t limit, void *context) {
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Using icon: %d.", SliceIcons[current_mood]);
+  const AppGlanceSlice entry = (AppGlanceSlice) {
+    .layout = {
+      .icon = SliceIcons[current_mood],
+      .subtitle_template_string = Moods[current_mood]
+    },
+    .expiration_time = APP_GLANCE_SLICE_NO_EXPIRATION
+  };
+
+  // Add the slice, and check the result
+  const AppGlanceResult result = app_glance_add_slice(session, entry);
+
+  if (result != APP_GLANCE_RESULT_SUCCESS) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "AppGlance Error: %d", result);
   }
 }
 
@@ -655,7 +662,7 @@ static void window_unload(Window *window) {
 }
 
 static void init(void) {
-  current_mood = persist_exists(MOOD) ? persist_read_int(MOOD) : current_mood;
+  current_mood = persist_exists(MESSAGE_KEY_mood) ? persist_read_int(MESSAGE_KEY_mood) : current_mood;
   Mood_colors[TERRIBLE] = GColorDarkCandyAppleRed;
   Mood_colors[BAD] = GColorOrange;
   Mood_colors[OK] = GColorIcterine;
@@ -706,7 +713,7 @@ static void init(void) {
 }
 
 static void deinit(void) {
-  persist_write_int(MOOD, current_mood);
+  persist_write_int(MESSAGE_KEY_mood, current_mood);
   window_destroy(window);
   if (history_window) {
     window_destroy(history_window);
@@ -714,6 +721,7 @@ static void deinit(void) {
   if (graph_window) {
     window_destroy(graph_window);
   }
+  app_glance_reload(prv_update_app_glance, NULL);
 }
 
 int main(void) {
